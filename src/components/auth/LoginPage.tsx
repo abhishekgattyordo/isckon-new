@@ -463,45 +463,6 @@ export const LoginPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Super Admin Quick Login / Create Banner */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-50/90 via-amber-50/60 to-amber-100/50 dark:from-indigo-950/50 dark:via-slate-900 dark:to-amber-950/40 border border-indigo-200/80 dark:border-indigo-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <ShieldCheck className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-slate-900 dark:text-white">Super Admin Access</span>
-                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                        GLOBAL
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                      Manage all branches, full RBAC & settings
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleDemoLogin('superadmin@aura-retail.org', 'superadmin108')}
-                    className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1"
-                    title="1-click login as Radha Mohan Das (Super Admin)"
-                  >
-                    <span>1-Click Log In</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateSuperAdminModalOpen(true)}
-                    className="px-2 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-[11px] font-bold transition-all cursor-pointer"
-                    title="Create a new Super Admin profile"
-                  >
-                    <span>+ New Super Admin</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Form */}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-1.5">
