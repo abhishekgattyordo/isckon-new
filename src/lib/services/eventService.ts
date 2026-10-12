@@ -189,6 +189,8 @@ export async function restoreEventService(id: string): Promise<boolean> {
 export async function permanentDeleteEventService(id: string): Promise<boolean> {
   try {
     if (process.env.DATABASE_URL) {
+      await prisma.eventAllocation.deleteMany({ where: { eventId: id } }).catch(() => {});
+      await prisma.eventTransaction.deleteMany({ where: { eventId: id } }).catch(() => {});
       await prisma.salesEvent.delete({
         where: { id },
       });

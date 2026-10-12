@@ -67,7 +67,7 @@ interface ERPContextType {
   transferStock: (sku: string, fromZone: string, toZone: string, qty: number, batchNo: string, refNo: string) => void;
   adjustStock: (sku: string, zone: string, qtyDelta: number, batchNo: string, reason: string, refNo: string) => void;
   events: SalesEvent[];
-  addEvent: (event: Omit<SalesEvent, 'id' | 'currentRevenue' | 'booksSoldQty' | 'booksSoldRevenue' | 'giftsSoldQty' | 'giftsSoldRevenue'>) => void | Promise<void>;
+  addEvent: (event: Omit<SalesEvent, 'id' | 'currentRevenue' | 'booksSoldQty' | 'booksSoldRevenue' | 'giftsSoldQty' | 'giftsSoldRevenue'>) => Promise<SalesEvent | undefined>;
   updateEvent: (id: string, updates: Partial<SalesEvent>) => void | Promise<void>;
   deleteEvent: (id: string) => void | Promise<void>;
   setEvents: React.Dispatch<React.SetStateAction<SalesEvent[]>>;
@@ -1268,7 +1268,7 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     quickNotification('POS Order Completed', `Order ${newOrder.orderNumber} (₹${newOrder.total.toFixed(2)}) processed at ${newOrder.branchName}.`, 'success');
   };
 
-  const addEvent = async (eventData: Omit<SalesEvent, 'id' | 'currentRevenue' | 'booksSoldQty' | 'booksSoldRevenue' | 'giftsSoldQty' | 'giftsSoldRevenue'>) => {
+  const addEvent = async (eventData: Omit<SalesEvent, 'id' | 'currentRevenue' | 'booksSoldQty' | 'booksSoldRevenue' | 'giftsSoldQty' | 'giftsSoldRevenue'>): Promise<SalesEvent | undefined> => {
     const newEvent: SalesEvent = {
       ...eventData,
       id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
@@ -1291,12 +1291,15 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const data = await res.json();
       if (data.success && data.event) {
         setEvents(prev => prev.map(e => e.id === newEvent.id ? { ...e, ...data.event } : e));
+        quickNotification('Sales Event Created', `Event "${newEvent.name}" is now registered for ${newEvent.branchName}.`, 'success');
+        return data.event;
       }
     } catch (e) {
       console.warn('Could not post sales event:', e);
     }
 
     quickNotification('Sales Event Created', `Event "${newEvent.name}" is now registered for ${newEvent.branchName}.`, 'success');
+    return newEvent;
   };
 
   const updateEvent = async (id: string, updates: Partial<SalesEvent>) => {

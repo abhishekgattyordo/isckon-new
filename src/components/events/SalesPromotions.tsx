@@ -201,12 +201,12 @@ export const SalesPromotions: React.FC = () => {
   };
 
   // Create Event Handler
-  const handleCreateEvent = (e: React.FormEvent) => {
+  const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalType = newEvent.type === 'custom' ? customEventType : newEvent.type;
     const code = generateEventCode(newEvent.name, finalType);
 
-    addEvent({
+    const created = await addEvent({
       name: newEvent.name,
       type: finalType.toLowerCase().replace(/\s+/g, '_') as any,
       startDate: `${newEvent.startDate}T${newEvent.startTime}:00Z`,
@@ -223,6 +223,9 @@ export const SalesPromotions: React.FC = () => {
       branchName: currentBranch?.name || 'Mayapur HQ Central'
     });
 
+    if (created && created.id) {
+      setSelectedEventId(created.id);
+    }
     setIsCreating(false);
     setActiveTab('directory');
   };
@@ -358,6 +361,34 @@ export const SalesPromotions: React.FC = () => {
     } catch (err) {
       console.warn('Error saving adjustment to backend:', err);
     }
+  };
+
+  // Remove allocation and return unused stock back to central inventory
+  const handleRemoveAllocation = async (alloc: EventAllocation) => {
+    const remainingToReturn = Math.max(0, alloc.allocatedQty - alloc.soldQty - alloc.damagedQty);
+    if (!confirm(`Return ${remainingToReturn} units of "${alloc.productName}" back to main warehouse?`)) return;
+
+    const product = products.find(p => p.sku === alloc.sku);
+    if (product && remainingToReturn > 0) {
+      updateProduct(product.id, {
+        stock: product.stock + remainingToReturn
+      });
+    }
+
+    setAllocations(prev => prev.filter(a => a.id !== alloc.id));
+
+    try {
+      await fetch(`/api/events/allocations?id=${encodeURIComponent(alloc.id)}`, {
+        method: 'DELETE'
+      });
+      quickNotification('Allocation Removed', `Returned ${remainingToReturn} units to main warehouse.`, 'success');
+    } catch (e) {
+      console.warn('Failed to delete allocation from DB:', e);
+    }
+
+    const targetEventId = selectedEvent?.id || selectedEventId;
+    const remainingAllocCount = allocations.filter(a => a.id !== alloc.id && (a.eventId === targetEventId || a.eventId === selectedEventId)).length;
+    await updateEvent(targetEventId, { allocatedSKUs: remainingAllocCount });
   };
 
   // POS: Add item to event cart
@@ -897,9 +928,15 @@ export const SalesPromotions: React.FC = () => {
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (confirm(`Move event "${event.name}" to Recycle Bin? (You can restore it later)`)) {
-                            deleteEvent(event.id);
+                            await deleteEvent(event.id);
+                            if (selectedEventId === event.id) {
+                              const remaining = events.filter(e => e.id !== event.id);
+                              if (remaining.length > 0) {
+                                setSelectedEventId(remaining[0].id);
+                              }
+                            }
                           }
                         }}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
@@ -1570,16 +1607,27 @@ export const SalesPromotions: React.FC = () => {
                                         </button>
                                       </div>
                                     ) : (
-                                      <button
-                                        onClick={() => {
-                                          setEditingAllocationId(a.id);
-                                          setDamagedInput(a.damagedQty);
-                                          setReturnedInput(a.returnedQty);
-                                        }}
-                                        className="text-[10px] font-bold text-[#B45309] hover:underline"
-                                      >
-                                        Record Damage
-                                      </button>
+                                      <div className="flex items-center justify-center gap-2">
+                                        <button
+                                          onClick={() => {
+                                            setEditingAllocationId(a.id);
+                                            setDamagedInput(a.damagedQty);
+                                            setReturnedInput(a.returnedQty);
+                                          }}
+                                          className="text-[10px] font-bold text-[#B45309] hover:underline"
+                                        >
+                                          Record Damage
+                                        </button>
+                                        {a.soldQty === 0 && (
+                                          <button
+                                            onClick={() => handleRemoveAllocation(a)}
+                                            className="text-[10px] font-bold text-rose-500 hover:underline"
+                                            title="Return unsold stock to main warehouse"
+                                          >
+                                            Deallocate
+                                          </button>
+                                        )}
+                                      </div>
                                     )}
                                   </>
                                 )}
