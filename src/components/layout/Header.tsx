@@ -190,6 +190,107 @@ export const Header: React.FC = () => {
 
       {/* Right: Quick actions, Help, Notifications, User */}
       <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* Branch Workspace Switcher */}
+        <div className="relative">
+          <button
+            onClick={() => {
+              if (accessibleBranches.length > 1 || isSuperAdmin(user)) {
+                setShowBranchMenu(!showBranchMenu);
+                setShowNotifications(false);
+                setShowProfileMenu(false);
+              }
+            }}
+            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all text-left text-xs ${
+              currentBranch?.id === 'all-branches'
+                ? 'bg-indigo-50/70 border-indigo-200 text-indigo-900 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-200'
+                : 'bg-amber-50/70 border-amber-200 text-amber-900 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-200'
+            } ${accessibleBranches.length > 1 || isSuperAdmin(user) ? 'cursor-pointer hover:shadow-xs' : 'cursor-default'}`}
+            title={
+              isSuperAdmin(user)
+                ? 'Super Admin: Switch Branch Workspace or View All Branches'
+                : accessibleBranches.length > 1
+                ? 'Switch between your assigned branches'
+                : `Assigned Operating Branch: ${currentBranch?.name}`
+            }
+          >
+            {currentBranch?.id === 'all-branches' ? (
+              <Globe className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+            ) : (
+              <Building2 className="w-3.5 h-3.5 text-[#D97706] shrink-0" />
+            )}
+            <div className="hidden sm:flex flex-col min-w-0 max-w-[130px] lg:max-w-[180px]">
+              <span className="text-[9px] uppercase font-mono font-bold tracking-wider text-slate-500 dark:text-slate-400 truncate flex items-center gap-1">
+                {isSuperAdmin(user) ? 'Global / Branch' : 'Operating Branch'}
+                {!isSuperAdmin(user) && accessibleBranches.length <= 1 && (
+                  <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                )}
+              </span>
+              <span className="font-bold text-[11px] truncate leading-tight">
+                {currentBranch?.name || 'Mayapur HQ Central'}
+              </span>
+            </div>
+            {(accessibleBranches.length > 1 || isSuperAdmin(user)) && (
+              <ChevronDown className="w-3 h-3 text-slate-500 shrink-0" />
+            )}
+          </button>
+
+          {showBranchMenu && (
+            <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-[#E8E2D9] dark:border-slate-800 shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="p-3 border-b border-[#E8E2D9] dark:border-slate-800 bg-[#FAF8F5] dark:bg-slate-950/50">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-[#1F1916] dark:text-white">Select Branch Workspace</span>
+                  <span className="text-[10px] font-mono font-bold text-amber-700 bg-amber-100/70 px-2 py-0.5 rounded-md">
+                    {isSuperAdmin(user) ? 'SUPER ADMIN' : `${accessibleBranches.length} ASSIGNED`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  {isSuperAdmin(user)
+                    ? 'Global access: Switch between any branch workspace or combined pan-India data.'
+                    : 'Your session is restricted to your assigned operating branch.'}
+                </p>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto p-1.5 space-y-1">
+                {accessibleBranches.map(branch => {
+                  const isCurrent = currentBranch?.id === branch.id;
+                  const isGlobal = branch.id === 'all-branches';
+                  return (
+                    <button
+                      key={branch.id}
+                      onClick={() => {
+                        setCurrentBranch(branch);
+                        setShowBranchMenu(false);
+                      }}
+                      className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-colors cursor-pointer ${
+                        isCurrent
+                          ? 'bg-amber-500/10 text-[#B45309] dark:text-amber-400 font-bold border border-amber-300/40'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {isGlobal ? (
+                          <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                            <Globe className="w-3.5 h-3.5" />
+                          </div>
+                        ) : (
+                          <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                            <Store className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-xs truncate">{branch.name}</p>
+                          <p className="text-[10px] text-slate-400 font-mono">{branch.code} • {branch.city}</p>
+                        </div>
+                      </div>
+                      {isCurrent && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Help Center */}
         <button
           onClick={() => setIsHelpOpen(true)}

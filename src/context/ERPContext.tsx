@@ -268,6 +268,14 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const setCurrentBranch = (branch: Branch) => {
+    if (user && !isSuperAdmin(user)) {
+      const allowed = userAccessibleBranches(user);
+      const isAllowed = allowed.some(b => b.id === branch.id || (b.code && b.code === branch.code));
+      if (!isAllowed) {
+        quickNotification('Access Denied', `You do not have permission to switch to "${branch.name}". Your access is restricted to your assigned operating branch.`, 'alert');
+        return;
+      }
+    }
     setCurrentBranchState(branch);
     if (typeof window !== 'undefined') {
       localStorage.setItem('iskcon_erp_current_branch', JSON.stringify(branch));
@@ -528,12 +536,12 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!u) return list[0];
 
     // 0. Super Admin global consolidated view
-    if (u.branchId === 'all-branches' || (isSuperAdmin(u as UserProfile) && u.branchId === 'all-branches')) {
+    if (isSuperAdmin(u as UserProfile) && (u.branchId === 'all-branches' || u.branch?.toLowerCase().includes('all') || u.branch?.toLowerCase().includes('global'))) {
       return GLOBAL_ALL_BRANCHES;
     }
 
     // 1. Match direct branchId
-    if (u.branchId) {
+    if (u.branchId && u.branchId !== 'all-branches') {
       const found = list.find(b => b.id === u.branchId);
       if (found) return found;
     }
@@ -543,7 +551,7 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const raw = u.branch.toLowerCase().trim();
       const clean = raw.replace(/[^a-z0-9]/g, '');
 
-      if (raw.includes('all branch') || raw.includes('global')) {
+      if ((raw.includes('all branch') || raw.includes('global')) && isSuperAdmin(u as UserProfile)) {
         return GLOBAL_ALL_BRANCHES;
       }
 
@@ -591,16 +599,13 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Branch CRUD & Access Helpers
   const userAccessibleBranches = (targetUser?: UserProfile): Branch[] => {
     const u = targetUser || user;
-    if (!u) return [GLOBAL_ALL_BRANCHES, ...branches];
+    if (!u) return branches;
     if (isSuperAdmin(u)) {
       return [GLOBAL_ALL_BRANCHES, ...branches];
     }
     if (u.accessibleBranchIds && u.accessibleBranchIds.length > 0 && !u.accessibleBranchIds.includes('*')) {
       const filtered = branches.filter(b => u.accessibleBranchIds?.includes(b.id));
       if (filtered.length > 0) return filtered;
-    }
-    if (u.accessibleBranchIds && u.accessibleBranchIds.includes('*')) {
-      return branches;
     }
     const resolved = resolveBranchForUser(u, branches);
     return [resolved];
@@ -932,7 +937,7 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setUser(updatedUser);
             localStorage.setItem('iskcon_erp_user', JSON.stringify(updatedUser));
             
-            // Respect already stored active working branch if valid
+            // Respect already stored active working branch if valid and permitted
             const savedBranchStr = localStorage.getItem('iskcon_erp_current_branch');
             let branchToSet: Branch | null = null;
             if (savedBranchStr) {
@@ -940,8 +945,9 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 const parsedBranch = JSON.parse(savedBranchStr);
                 if (parsedBranch?.id === 'all-branches' && isSuperAdmin(updatedUser)) {
                   branchToSet = GLOBAL_ALL_BRANCHES;
-                } else {
-                  const found = branches.find(b => b.id === parsedBranch?.id);
+                } else if (parsedBranch?.id && parsedBranch?.id !== 'all-branches') {
+                  const allowed = userAccessibleBranches(updatedUser);
+                  const found = allowed.find(b => b.id === parsedBranch?.id);
                   if (found) branchToSet = found;
                 }
               } catch (e) {}
@@ -1865,9 +1871,10 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Determine target branch
       let targetBranch: Branch;
       if (selectedBranchId === 'all-branches') {
-        targetBranch = GLOBAL_ALL_BRANCHES;
+        targetBranch = isSuperAdmin(foundUser) ? GLOBAL_ALL_BRANCHES : resolveBranchForUser(foundUser, branches);
       } else if (selectedBranchId) {
-        const match = branches.find(b => b.id === selectedBranchId);
+        const allowed = userAccessibleBranches(foundUser);
+        const match = allowed.find(b => b.id === selectedBranchId);
         targetBranch = match || resolveBranchForUser(foundUser, branches);
       } else {
         targetBranch = resolveBranchForUser(foundUser, branches);

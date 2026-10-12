@@ -652,9 +652,9 @@ export const SalesPromotions: React.FC = () => {
             stallManager: selectedEvent.managerName || eventAny.stallManager || 'Unassigned',
             targetSales: selectedEvent.targetRevenue || eventAny.targetSales || 0,
             discountPercent: eventAny.discountPercent || 0,
-            status: selectedEvent.status
+            status: selectedEvent?.status || 'active'
           },
-          allocations: eventAllocatedItems.map(a => ({
+          allocations: (eventAllocatedItems || []).map(a => ({
             sku: a.sku,
             productName: a.productName,
             category: a.category,
@@ -829,12 +829,12 @@ export const SalesPromotions: React.FC = () => {
                 </button>
               </div>
             ) : (
-              events.map(event => {
+              (events || []).map(event => {
                 if (!event) return null;
-                const eventSales = allocations.filter(a => a.eventId === event.id);
-                const totalItemsAllocated = eventSales.reduce((sum, a) => sum + (a.allocatedQty || 0), 0);
-                const progress = Math.min(100, Math.round(((event.currentRevenue || 0) / (event.targetRevenue || 1)) * 100));
-                const eventStatus = event.status || 'upcoming';
+                const eventSales = (allocations || []).filter(a => a?.eventId === event?.id);
+                const totalItemsAllocated = eventSales.reduce((sum, a) => sum + (a?.allocatedQty || 0), 0);
+                const progress = Math.min(100, Math.round(((event?.currentRevenue || 0) / (event?.targetRevenue || 1)) * 100));
+                const eventStatus = event?.status || 'upcoming';
 
                 return (
                   <div
@@ -1174,11 +1174,14 @@ export const SalesPromotions: React.FC = () => {
                     onChange={e => setSelectedEventId(e.target.value)}
                     className="font-bold text-sm bg-transparent border-none text-slate-900 dark:text-white focus:outline-none cursor-pointer"
                   >
-                    {events.map(ev => (
-                      <option key={ev.id} value={ev.id} className="dark:bg-slate-900">
-                        {ev.name} ({((ev?.status || 'upcoming')).toUpperCase()})
-                      </option>
-                    ))}
+                    {(events || []).map(ev => {
+                      if (!ev) return null;
+                      return (
+                        <option key={ev.id} value={ev.id} className="dark:bg-slate-900">
+                          {ev.name || 'Untitled Event'} ({((ev?.status || 'upcoming')).toUpperCase()})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>

@@ -92,8 +92,8 @@ export async function getUsers(includeDeleted = false, branchId?: string): Promi
         );
         const accessibleBranchIds = (u as any).accessibleBranchIds?.length
           ? (u as any).accessibleBranchIds
-          : (u.role === 'Super Admin' || u.role === 'Administrator' || u.role === 'System Admin' || u.role === 'Store Manager'
-              ? ['branch-mayapur-hq', 'branch-bangalore', 'branch-mangalore', 'branch-vrindavan-store', 'branch-mumbai-juhu', 'branch-delhi-glory']
+          : (u.role === 'Super Admin' || u.role === 'Administrator' || u.role === 'System Admin'
+              ? ['*']
               : [branchIdVal]);
 
         const rawPerms = (u.permissions || []) as any[];

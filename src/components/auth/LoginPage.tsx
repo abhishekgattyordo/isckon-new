@@ -163,22 +163,15 @@ export const LoginPage: React.FC = () => {
     if (isSuperAdmin(targetUser)) {
       return [GLOBAL_ALL_BRANCHES, ...activeBranches];
     }
-    if (
-      targetUser.role === 'Administrator' ||
-      targetUser.role === 'System Admin' ||
-      targetUser.role === 'Store Manager' ||
-      targetUser.role === 'Branch Admin' ||
-      targetUser.accessibleBranchIds?.includes('*')
-    ) {
-      if (targetUser.accessibleBranchIds && targetUser.accessibleBranchIds.length > 0 && !targetUser.accessibleBranchIds.includes('*')) {
-        const filtered = activeBranches.filter(b => targetUser.accessibleBranchIds!.includes(b.id));
-        if (filtered.length > 0) return filtered;
-      }
-      return activeBranches;
-    }
-    if (targetUser.accessibleBranchIds && targetUser.accessibleBranchIds.length > 0) {
+    // If user has specific accessibleBranchIds assigned, restrict strictly to those:
+    if (targetUser.accessibleBranchIds && targetUser.accessibleBranchIds.length > 0 && !targetUser.accessibleBranchIds.includes('*')) {
       const filtered = activeBranches.filter(b => targetUser.accessibleBranchIds!.includes(b.id));
       if (filtered.length > 0) return filtered;
+    }
+    // If not superadmin, restrict strictly to their primary operating branch
+    if (targetUser.branchId) {
+      const primary = activeBranches.find(b => b.id === targetUser.branchId);
+      if (primary) return [primary];
     }
     const raw = (targetUser.branch || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
     const isBlr = raw.includes('bang') || raw.includes('blr') || raw.includes('bengaluru');

@@ -60,12 +60,12 @@ export async function getAllRecycleBinItems(): Promise<RecycleBinItem[]> {
     items.push({
       id: e.id,
       type: 'event',
-      name: e.name,
-      codeOrSku: e.type.toUpperCase(),
-      categoryOrRole: e.status.toUpperCase(),
+      name: e.name || 'Untitled Event',
+      codeOrSku: (e.type || 'EVENT').toUpperCase(),
+      categoryOrRole: (e.status || 'ACTIVE').toUpperCase(),
       deletedAt: e.deletedAt || new Date().toISOString(),
       deletedBy: e.deletedBy || e.managerName || 'Festival Admin',
-      details: `Location: ${e.stallLocation || 'Temple Stall'} | Target: ₹${e.targetRevenue.toLocaleString()}`,
+      details: `Location: ${e.stallLocation || 'Temple Stall'} | Target: ₹${(e.targetRevenue || 0).toLocaleString()}`,
       originalData: e,
     });
   });

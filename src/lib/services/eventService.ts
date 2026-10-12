@@ -79,6 +79,8 @@ export async function createEvent(evtData: Omit<SalesEvent, 'id' | 'currentReven
   const newEvent: SalesEvent = {
     ...evtData,
     id: evtData.id || `evt-${Date.now()}`,
+    type: (evtData.type || 'stall_booth') as any,
+    status: (evtData.status || 'upcoming') as any,
     currentRevenue: Number(evtData.currentRevenue || 0),
     isDeleted: false,
   };
@@ -89,13 +91,13 @@ export async function createEvent(evtData: Omit<SalesEvent, 'id' | 'currentReven
         data: {
           id: newEvent.id,
           name: newEvent.name,
-          type: newEvent.type,
+          type: newEvent.type || 'stall_booth',
           startDate: newEvent.startDate,
           endDate: newEvent.endDate,
-          status: newEvent.status,
-          targetRevenue: Number(newEvent.targetRevenue),
-          currentRevenue: Number(newEvent.currentRevenue),
-          allocatedSKUs: Number(newEvent.allocatedSKUs),
+          status: newEvent.status || 'upcoming',
+          targetRevenue: Number(newEvent.targetRevenue || 0),
+          currentRevenue: Number(newEvent.currentRevenue || 0),
+          allocatedSKUs: Number(newEvent.allocatedSKUs || 0),
           discountRule: newEvent.discountRule,
           description: newEvent.description,
           bannerColor: newEvent.bannerColor,

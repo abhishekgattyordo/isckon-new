@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   ExternalLink,
   Power,
-  ShieldAlert
+  ShieldAlert,
+  Lock
 } from 'lucide-react';
 
 export const BranchManagement: React.FC = () => {
@@ -31,6 +32,7 @@ export const BranchManagement: React.FC = () => {
     updateBranch,
     deleteBranch,
     quickNotification,
+    userAccessibleBranches,
     user
   } = useERP();
 
@@ -261,14 +263,27 @@ export const BranchManagement: React.FC = () => {
                       <span>Current Workspace</span>
                     </span>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setCurrentBranch(b)}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-amber-600 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-amber-400 transition-colors cursor-pointer"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      <span>Switch to this Branch</span>
-                    </button>
+                    (() => {
+                      const canAccess = isSuper || (userAccessibleBranches(user) || []).some(ub => ub.id === b.id);
+                      if (!canAccess) {
+                        return (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800" title="Restricted to your assigned operating branch">
+                            <Lock className="w-3 h-3 text-slate-400" />
+                            <span>Restricted Branch</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setCurrentBranch(b)}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-amber-600 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-amber-400 transition-colors cursor-pointer"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Switch to this Branch</span>
+                        </button>
+                      );
+                    })()
                   )}
                 </div>
 

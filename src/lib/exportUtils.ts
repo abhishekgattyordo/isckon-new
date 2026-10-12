@@ -61,7 +61,7 @@ export function exportEventToExcel(data: EventExportData) {
     ['ISKCON RETAIL ERP - EVENT INVENTORY RECONCILIATION REPORT'],
     [`Event: ${data.event.name} (${data.event.code || data.event.id})`],
     [`Location: ${data.event.stallLocation || 'Main Stall'} | Manager: ${data.event.stallManager || 'Unassigned'}`],
-    [`Period: ${data.event.startDate} to ${data.event.endDate} | Status: ${data.event.status.toUpperCase()}`],
+    [`Period: ${data.event.startDate} to ${data.event.endDate} | Status: ${(data?.event?.status || 'upcoming').toUpperCase()}`],
     [],
     ['SKU', 'Product Name', 'Category', 'Unit Price (₹)', 'Allocated Qty', 'Sold Qty', 'Damaged Qty', 'Unsold/Returned Qty', 'Gross Revenue (₹)'],
     ...data.allocations.map(a => [
@@ -203,7 +203,7 @@ export function exportEventToPdf(data: EventExportData) {
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   doc.text(
-    `Stall Spot: ${data.event.stallLocation || 'Main Stall'}  |  Manager: ${data.event.stallManager || 'Unassigned'}  |  Dates: ${data.event.startDate} to ${data.event.endDate}  |  Status: ${data.event.status.toUpperCase()}`,
+    `Stall Spot: ${data.event.stallLocation || 'Main Stall'}  |  Manager: ${data.event.stallManager || 'Unassigned'}  |  Dates: ${data.event.startDate} to ${data.event.endDate}  |  Status: ${(data?.event?.status || 'upcoming').toUpperCase()}`,
     18,
     43
   );
