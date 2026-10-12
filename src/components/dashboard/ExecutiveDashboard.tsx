@@ -544,13 +544,13 @@ export const ExecutiveDashboard: React.FC = () => {
                       </div>
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold font-mono tracking-wide uppercase shrink-0 border ${
-                      evt.status === 'active'
+                      evt?.status === 'active'
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                        : evt.status === 'upcoming'
+                        : evt?.status === 'upcoming'
                         ? 'bg-amber-50 text-amber-700 border border-amber-100'
                         : 'bg-slate-50 text-slate-500 border border-slate-200'
                     }`}>
-                      {evt.status}
+                      {evt?.status || 'SCHEDULED'}
                     </span>
                   </div>
                 ))

@@ -17,8 +17,8 @@ export async function getEvents(includeDeleted = false, branchId?: string): Prom
       if (dbEvents && dbEvents.length > 0) {
         let mapped = dbEvents.map(e => ({
           ...e,
-          type: e.type as any,
-          status: e.status as any,
+          type: (e.type || 'stall_booth') as any,
+          status: (e.status || 'upcoming') as any,
           branchId: (e as any).branchId || undefined,
           branchName: (e as any).branchName || undefined,
           isDeleted: e.isDeleted || false,
@@ -189,8 +189,6 @@ export async function restoreEventService(id: string): Promise<boolean> {
 export async function permanentDeleteEventService(id: string): Promise<boolean> {
   try {
     if (process.env.DATABASE_URL) {
-      await prisma.eventAllocation.deleteMany({ where: { eventId: id } }).catch(() => {});
-      await prisma.eventTransaction.deleteMany({ where: { eventId: id } }).catch(() => {});
       await prisma.salesEvent.delete({
         where: { id },
       });

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ModuleType } from '@/types';
 import { useERP } from '@/context/ERPContext';
 import { canAccessModule, getModuleLabel, getDefaultPermissionsForRole } from '@/lib/authUtils';
 import { ShieldAlert, ArrowLeft, Lock, UserCheck } from 'lucide-react';
@@ -18,11 +19,19 @@ import { SettingsPage } from '@/components/settings/SettingsPage';
 import { AuditLogPage } from '@/components/reports/AuditLogPage';
 import { RecycleBinPage } from '@/components/recycle/RecycleBinPage';
 
-export default function CatchAllPageClient() {
+export default function CatchAllPageClient({ initialModule }: { initialModule?: ModuleType | 'audit' } = {}) {
   const { activeModule, setActiveModule, user, currentBranch } = useERP();
 
+  React.useEffect(() => {
+    if (initialModule && activeModule !== initialModule) {
+      setActiveModule(initialModule);
+    }
+  }, [initialModule, setActiveModule, activeModule]);
+
+  const currentMod = initialModule || activeModule;
+
   // Route Guard / Middleware enforcement
-  const isAllowed = canAccessModule(user, activeModule);
+  const isAllowed = canAccessModule(user, currentMod);
 
   if (!isAllowed) {
     // Determine the user's first allowed module to safely redirect
@@ -83,7 +92,7 @@ export default function CatchAllPageClient() {
     );
   }
 
-  switch (activeModule) {
+  switch (currentMod) {
     case 'pos':
       return <POSTerminal />;
     case 'inward':

@@ -125,7 +125,7 @@ export const SalesPromotions: React.FC = () => {
   });
 
   // Current selected event object
-  const selectedEvent = events.find(e => e.id === selectedEventId) || events[0];
+  const selectedEvent = events?.find(e => e?.id === selectedEventId) || events?.[0] || null;
 
   // Dynamic allocations & transactions state from database
   const [allocations, setAllocations] = useState<EventAllocation[]>([]);
@@ -201,12 +201,12 @@ export const SalesPromotions: React.FC = () => {
   };
 
   // Create Event Handler
-  const handleCreateEvent = async (e: React.FormEvent) => {
+  const handleCreateEvent = (e: React.FormEvent) => {
     e.preventDefault();
     const finalType = newEvent.type === 'custom' ? customEventType : newEvent.type;
     const code = generateEventCode(newEvent.name, finalType);
 
-    const created = await addEvent({
+    addEvent({
       name: newEvent.name,
       type: finalType.toLowerCase().replace(/\s+/g, '_') as any,
       startDate: `${newEvent.startDate}T${newEvent.startTime}:00Z`,
@@ -223,9 +223,6 @@ export const SalesPromotions: React.FC = () => {
       branchName: currentBranch?.name || 'Mayapur HQ Central'
     });
 
-    if (created && created.id) {
-      setSelectedEventId(created.id);
-    }
     setIsCreating(false);
     setActiveTab('directory');
   };
@@ -361,34 +358,6 @@ export const SalesPromotions: React.FC = () => {
     } catch (err) {
       console.warn('Error saving adjustment to backend:', err);
     }
-  };
-
-  // Remove allocation and return unused stock back to central inventory
-  const handleRemoveAllocation = async (alloc: EventAllocation) => {
-    const remainingToReturn = Math.max(0, alloc.allocatedQty - alloc.soldQty - alloc.damagedQty);
-    if (!confirm(`Return ${remainingToReturn} units of "${alloc.productName}" back to main warehouse?`)) return;
-
-    const product = products.find(p => p.sku === alloc.sku);
-    if (product && remainingToReturn > 0) {
-      updateProduct(product.id, {
-        stock: product.stock + remainingToReturn
-      });
-    }
-
-    setAllocations(prev => prev.filter(a => a.id !== alloc.id));
-
-    try {
-      await fetch(`/api/events/allocations?id=${encodeURIComponent(alloc.id)}`, {
-        method: 'DELETE'
-      });
-      quickNotification('Allocation Removed', `Returned ${remainingToReturn} units to main warehouse.`, 'success');
-    } catch (e) {
-      console.warn('Failed to delete allocation from DB:', e);
-    }
-
-    const targetEventId = selectedEvent?.id || selectedEventId;
-    const remainingAllocCount = allocations.filter(a => a.id !== alloc.id && (a.eventId === targetEventId || a.eventId === selectedEventId)).length;
-    await updateEvent(targetEventId, { allocatedSKUs: remainingAllocCount });
   };
 
   // POS: Add item to event cart
@@ -818,61 +787,80 @@ export const SalesPromotions: React.FC = () => {
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">Active Events</span>
               <p className="text-xl font-bold font-mono text-emerald-600 mt-1">
-                {events.filter(e => e.status === 'active').length}
+                {events?.filter(e => e?.status === 'active').length || 0}
               </p>
             </div>
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">Upcoming Events</span>
               <p className="text-xl font-bold font-mono text-amber-500 mt-1">
-                {events.filter(e => e.status === 'upcoming').length}
+                {events?.filter(e => e?.status === 'upcoming').length || 0}
               </p>
             </div>
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">Completed</span>
               <p className="text-xl font-bold font-mono text-slate-600 dark:text-slate-400 mt-1">
-                {events.filter(e => e.status === 'ended').length}
+                {events?.filter(e => e?.status === 'ended').length || 0}
               </p>
             </div>
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">Total Event Sales</span>
               <p className="text-xl font-bold font-mono text-amber-600 mt-1">
-                ₹{events.reduce((sum, e) => sum + (e.currentRevenue || 0), 0).toLocaleString('en-IN')}
+                ₹{(events || []).reduce((sum, e) => sum + (e?.currentRevenue || 0), 0).toLocaleString('en-IN')}
               </p>
             </div>
           </div>
 
           {/* Events List Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {events.map(event => {
-              const eventSales = allocations.filter(a => a.eventId === event.id);
-              const totalItemsAllocated = eventSales.reduce((sum, a) => sum + a.allocatedQty, 0);
-              const progress = Math.min(100, Math.round(((event.currentRevenue || 0) / event.targetRevenue) * 100));
-
-              return (
-                <div
-                  key={event.id}
-                  className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:shadow-sm transition-all"
+            {(!events || events.length === 0) ? (
+              <div className="col-span-full p-12 text-center rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center mx-auto">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">No Sales Events Scheduled</h3>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  No sales events or stalls are currently registered for this branch. Click below to register your first event.
+                </p>
+                <button
+                  onClick={() => setIsCreating(true)}
+                  className="mt-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs"
                 >
-                  <div>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <span className="text-[9px] font-mono font-bold uppercase text-[#D97706] bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-200/50">
-                          {event.type.replace('_', ' ').toUpperCase()}
+                  Create New Event
+                </button>
+              </div>
+            ) : (
+              events.map(event => {
+                if (!event) return null;
+                const eventSales = allocations.filter(a => a.eventId === event.id);
+                const totalItemsAllocated = eventSales.reduce((sum, a) => sum + (a.allocatedQty || 0), 0);
+                const progress = Math.min(100, Math.round(((event.currentRevenue || 0) / (event.targetRevenue || 1)) * 100));
+                const eventStatus = event.status || 'upcoming';
+
+                return (
+                  <div
+                    key={event.id}
+                    className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:shadow-sm transition-all"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span className="text-[9px] font-mono font-bold uppercase text-[#D97706] bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-200/50">
+                            {(event.type || 'STALL').replace('_', ' ').toUpperCase()}
+                          </span>
+                          <h3 className="font-bold text-base text-slate-900 dark:text-white mt-1.5 font-display line-clamp-1">
+                            {event.name}
+                          </h3>
+                        </div>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase shrink-0 border ${
+                          eventStatus === 'active'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : eventStatus === 'upcoming'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400'
+                        }`}>
+                          {eventStatus}
                         </span>
-                        <h3 className="font-bold text-base text-slate-900 dark:text-white mt-1.5 font-display line-clamp-1">
-                          {event.name}
-                        </h3>
                       </div>
-                      <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase shrink-0 border ${
-                        event.status === 'active'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : event.status === 'upcoming'
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400'
-                      }`}>
-                        {event.status}
-                      </span>
-                    </div>
 
                     <p className="text-xs text-slate-400 mt-1 line-clamp-2">
                       {event.description.split('|')[0]}
@@ -928,15 +916,9 @@ export const SalesPromotions: React.FC = () => {
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={async () => {
+                        onClick={() => {
                           if (confirm(`Move event "${event.name}" to Recycle Bin? (You can restore it later)`)) {
-                            await deleteEvent(event.id);
-                            if (selectedEventId === event.id) {
-                              const remaining = events.filter(e => e.id !== event.id);
-                              if (remaining.length > 0) {
-                                setSelectedEventId(remaining[0].id);
-                              }
-                            }
+                            deleteEvent(event.id);
                           }
                         }}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
@@ -959,7 +941,8 @@ export const SalesPromotions: React.FC = () => {
                   </div>
                 </div>
               );
-            })}
+            })
+          )}
           </div>
         </div>
       )}
@@ -1154,37 +1137,62 @@ export const SalesPromotions: React.FC = () => {
 
       {/* 4. Event Workspace Tab */}
       {activeTab === 'workspace' && (
-        <div className="space-y-6">
-          {/* Event Quick Selector Bar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-[#FAF8F5] dark:bg-slate-950 border border-[#E8E2D9] dark:border-slate-800/80">
-            <div className="flex items-center gap-3">
-              <Bookmark className="w-5 h-5 text-[#D97706]" />
-              <div>
-                <span className="text-[10px] text-slate-400 block font-mono">SELECTED WORKSPACE EVENT</span>
-                <select
-                  value={selectedEventId}
-                  onChange={e => setSelectedEventId(e.target.value)}
-                  className="font-bold text-sm bg-transparent border-none text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-                >
-                  {events.map(ev => (
-                    <option key={ev.id} value={ev.id} className="dark:bg-slate-900">
-                      {ev.name} ({ev.status.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-              </div>
+        !selectedEvent ? (
+          <div className="p-12 text-center rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center mx-auto">
+              <Bookmark className="w-6 h-6" />
             </div>
+            <h3 className="font-bold text-base text-slate-900 dark:text-white">No Event Selected</h3>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              Please choose an active event from the Event Directory or create a new event first.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                onClick={() => setActiveTab('directory')}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs"
+              >
+                Go to Event Directory
+              </button>
+              <button
+                onClick={() => setIsCreating(true)}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs"
+              >
+                Create New Event
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Event Quick Selector Bar */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-[#FAF8F5] dark:bg-slate-950 border border-[#E8E2D9] dark:border-slate-800/80">
+              <div className="flex items-center gap-3">
+                <Bookmark className="w-5 h-5 text-[#D97706]" />
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-mono">SELECTED WORKSPACE EVENT</span>
+                  <select
+                    value={selectedEventId}
+                    onChange={e => setSelectedEventId(e.target.value)}
+                    className="font-bold text-sm bg-transparent border-none text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+                  >
+                    {events.map(ev => (
+                      <option key={ev.id} value={ev.id} className="dark:bg-slate-900">
+                        {ev.name} ({((ev?.status || 'upcoming')).toUpperCase()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-            <div className="flex items-center gap-2">
-              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
-                selectedEvent?.status === 'active'
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                  : selectedEvent?.status === 'upcoming'
-                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                  : 'bg-slate-50 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:text-slate-400'
-              }`}>
-                {selectedEvent?.status}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
+                  selectedEvent?.status === 'active'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : selectedEvent?.status === 'upcoming'
+                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                    : 'bg-slate-50 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:text-slate-400'
+                }`}>
+                  {selectedEvent?.status || 'UPCOMING'}
+                </span>
 
               {selectedEvent?.status === 'upcoming' && (
                 <button
@@ -1446,7 +1454,7 @@ export const SalesPromotions: React.FC = () => {
           {workspaceSubTab === 'inventory' && (
             <div className="space-y-6">
               {/* Allocation form */}
-              {selectedEvent.status !== 'ended' && (
+              {selectedEvent?.status !== 'ended' && (
                 <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
                   <h3 className="font-bold text-sm text-slate-950 dark:text-white uppercase font-mono tracking-wider flex items-center gap-2">
                     <Boxes className="w-5 h-5 text-[#D97706]" />
@@ -1587,7 +1595,7 @@ export const SalesPromotions: React.FC = () => {
                                 ₹{(a.soldQty * a.price).toLocaleString('en-IN')}
                               </td>
                               <td className="py-3 text-center">
-                                {selectedEvent.status !== 'ended' && (
+                                {selectedEvent?.status !== 'ended' && (
                                   <>
                                     {isEditing ? (
                                       <div className="flex justify-center gap-1">
@@ -1607,27 +1615,16 @@ export const SalesPromotions: React.FC = () => {
                                         </button>
                                       </div>
                                     ) : (
-                                      <div className="flex items-center justify-center gap-2">
-                                        <button
-                                          onClick={() => {
-                                            setEditingAllocationId(a.id);
-                                            setDamagedInput(a.damagedQty);
-                                            setReturnedInput(a.returnedQty);
-                                          }}
-                                          className="text-[10px] font-bold text-[#B45309] hover:underline"
-                                        >
-                                          Record Damage
-                                        </button>
-                                        {a.soldQty === 0 && (
-                                          <button
-                                            onClick={() => handleRemoveAllocation(a)}
-                                            className="text-[10px] font-bold text-rose-500 hover:underline"
-                                            title="Return unsold stock to main warehouse"
-                                          >
-                                            Deallocate
-                                          </button>
-                                        )}
-                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          setEditingAllocationId(a.id);
+                                          setDamagedInput(a.damagedQty);
+                                          setReturnedInput(a.returnedQty);
+                                        }}
+                                        className="text-[10px] font-bold text-[#B45309] hover:underline"
+                                      >
+                                        Record Damage
+                                      </button>
                                     )}
                                   </>
                                 )}
@@ -1646,7 +1643,7 @@ export const SalesPromotions: React.FC = () => {
           {/* Sub-tab 3: Event POS Checkout */}
           {workspaceSubTab === 'pos' && (
             <div className="space-y-6 text-xs">
-              {selectedEvent.status !== 'active' ? (
+              {selectedEvent?.status !== 'active' ? (
                 <div className="p-8 rounded-2xl bg-amber-50 border border-amber-200 text-center text-amber-800">
                   <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-2" />
                   <p className="font-bold">POS Terminal Locked</p>
@@ -1915,7 +1912,7 @@ export const SalesPromotions: React.FC = () => {
                       <span className="font-bold text-slate-900 dark:text-white font-mono">
                         ₹
                         {txs.length > 0
-                          ? Math.round(selectedEvent.currentRevenue / txs.length).toLocaleString('en-IN')
+                          ? Math.round((selectedEvent?.currentRevenue || 0) / txs.length).toLocaleString('en-IN')
                           : 0}
                       </span>
                     </div>
@@ -2014,7 +2011,7 @@ export const SalesPromotions: React.FC = () => {
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
                     <span className="text-slate-400 block font-mono text-[9px] uppercase">Unsold Stock Refunded</span>
                     <span className="font-bold font-mono text-indigo-500 text-base mt-1 block">
-                      {selectedEvent.status === 'ended' ? totalRemainingQty : 'Pending Event End'}
+                      {selectedEvent?.status === 'ended' ? totalRemainingQty : 'Pending Event End'}
                     </span>
                   </div>
                 </div>
@@ -2022,6 +2019,7 @@ export const SalesPromotions: React.FC = () => {
             </div>
           )}
         </div>
+        )
       )}
 
       {/* 5. Customer Printable Receipt Modal */}
@@ -2040,7 +2038,7 @@ export const SalesPromotions: React.FC = () => {
               <span className="text-slate-900 dark:text-white font-bold block text-sm">ISKCON TEMPLE RETAIL</span>
               <span className="text-[10px] text-slate-500 block">Hare Krishna Hill, Rajajinagar, Bangalore</span>
               <span className="text-[10px] text-slate-500 block uppercase font-bold text-amber-600">
-                {selectedEvent.name}
+                {selectedEvent?.name || 'Sales Event'}
               </span>
               <div className="border-b border-dashed border-slate-200 dark:border-slate-800 my-2" />
             </div>
@@ -2061,7 +2059,7 @@ export const SalesPromotions: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>Stall Spot:</span>
-                <span>{selectedEvent.stallLocation}</span>
+                <span>{selectedEvent?.stallLocation || 'Main Stall Area'}</span>
               </div>
             </div>
 
