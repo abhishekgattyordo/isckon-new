@@ -8,10 +8,22 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const includeDeleted = url.searchParams.get('includeDeleted') === 'true';
     const branchId = url.searchParams.get('branchId') || req.headers.get('x-branch-id') || undefined;
-    const products = await getProducts(includeDeleted, branchId).catch(() => []);
-    return NextResponse.json({ success: true, products: products || [], dbConnected: !!process.env.DATABASE_URL });
+    const search = url.searchParams.get('search') || undefined;
+    const page = parseInt(url.searchParams.get('page') || '1', 10);
+    const limit = parseInt(url.searchParams.get('limit') || '20', 10);
+
+    const result = await getProducts({ includeDeleted, branchId, search, page, limit });
+    return NextResponse.json({
+      success: true,
+      products: result.products || [],
+      totalCount: result.totalCount || 0,
+      page: result.page || 1,
+      limit: result.limit || limit,
+      totalPages: result.totalPages || 1,
+      dbConnected: !!process.env.DATABASE_URL
+    });
   } catch (error: any) {
-    return NextResponse.json({ success: true, products: [], dbConnected: !!process.env.DATABASE_URL, error: error?.message }, { status: 200 });
+    return NextResponse.json({ success: true, products: [], totalCount: 0, page: 1, limit: 20, totalPages: 1, dbConnected: !!process.env.DATABASE_URL, error: error?.message }, { status: 200 });
   }
 }
 

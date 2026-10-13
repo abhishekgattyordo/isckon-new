@@ -83,6 +83,8 @@ const SkuSearchLookup: React.FC<SkuSearchLookupProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [fetchedProducts, setFetchedProducts] = useState<SkuProductInfo[]>(availableProducts.slice(0, 5));
+  const [isLoading, setIsLoading] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -102,32 +104,34 @@ const SkuSearchLookup: React.FC<SkuSearchLookupProps> = ({
     };
   }, [isOpen]);
 
-  // Filter products by SKU or Product Name starting with typed letters, followed by substring matches
-  const filteredProducts = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return availableProducts;
-    }
-    const q = searchTerm.trim().toLowerCase();
-
-    const startsWithSku: SkuProductInfo[] = [];
-    const startsWithName: SkuProductInfo[] = [];
-    const containsQuery: SkuProductInfo[] = [];
-
-    for (const p of availableProducts) {
-      const skuLower = p.sku.toLowerCase();
-      const nameLower = (p.name || p.description || '').toLowerCase();
-
-      if (skuLower.startsWith(q)) {
-        startsWithSku.push(p);
-      } else if (nameLower.startsWith(q)) {
-        startsWithName.push(p);
-      } else if (skuLower.includes(q) || nameLower.includes(q)) {
-        containsQuery.push(p);
+  // AJAX-style dynamic backend search limited to top 5 matching items
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        const qParam = searchTerm.trim() ? `&search=${encodeURIComponent(searchTerm.trim())}` : '';
+        const res = await fetch(`/api/products?limit=5${qParam}`).then(r => r.json());
+        if (res.success && Array.isArray(res.products)) {
+          setFetchedProducts(res.products.slice(0, 5));
+        } else {
+          const q = searchTerm.trim().toLowerCase();
+          const filtered = !q ? availableProducts : availableProducts.filter(p => p.sku.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q));
+          setFetchedProducts(filtered.slice(0, 5));
+        }
+      } catch {
+        const q = searchTerm.trim().toLowerCase();
+        const filtered = !q ? availableProducts : availableProducts.filter(p => p.sku.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q));
+        setFetchedProducts(filtered.slice(0, 5));
+      } finally {
+        setIsLoading(false);
       }
-    }
+    }, 250);
 
-    return [...startsWithSku, ...startsWithName, ...containsQuery];
-  }, [availableProducts, searchTerm]);
+    return () => clearTimeout(timer);
+  }, [searchTerm, isOpen, availableProducts]);
+
+  const filteredProducts = fetchedProducts;
 
   // Reset highlighted index when searchTerm changes
   useEffect(() => {
@@ -222,15 +226,15 @@ const SkuSearchLookup: React.FC<SkuSearchLookupProps> = ({
 
       {/* Search Dropdown Popover */}
       {isOpen && (
-        <div className="absolute left-0 top-full mt-1.5 w-[340px] sm:w-[400px] max-w-[90vw] bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100">
-          <div className="p-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/90 dark:bg-slate-950/80 flex items-center justify-between text-[11px] font-mono text-gray-500 uppercase tracking-wider">
+        <div className="absolute left-0 top-full mt-2 w-full min-w-[380px] sm:w-[440px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-150">
+          <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 flex items-center justify-between text-[11px] font-mono text-slate-500 uppercase tracking-wider">
             <span>SKU Search Lookup ({filteredProducts.length} results)</span>
-            <span className="text-[10px] text-gray-400">↑↓ navigate, ↵ select</span>
+            <span className="text-[10px] text-slate-400">↑↓ navigate, ↵ select</span>
           </div>
 
           <div
             ref={listRef}
-            className="max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800/60"
+            className="max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 p-1.5"
           >
             {filteredProducts.length > 0 ? (
               filteredProducts.map((p, idx) => {
@@ -243,50 +247,38 @@ const SkuSearchLookup: React.FC<SkuSearchLookupProps> = ({
                     key={p.sku}
                     onClick={() => handleSelectProduct(p.sku)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
-                    className={`p-3 cursor-pointer transition-colors flex items-start justify-between gap-3 ${
+                    className={`p-3 rounded-xl cursor-pointer transition-colors flex items-center justify-between gap-3 text-xs ${
                       isHighlighted
-                        ? 'bg-gray-100 dark:bg-slate-800'
+                        ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 font-semibold'
                         : isSelected
-                        ? 'bg-gray-50 dark:bg-slate-800/50'
-                        : 'hover:bg-gray-50 dark:hover:bg-slate-800/60'
+                        ? 'bg-slate-100 dark:bg-slate-800 font-bold text-slate-900 dark:text-white'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300'
                     }`}
                   >
-                    <div className="min-w-0 flex-1">
-                      {/* Format: SKU — Product Name */}
-                      <div className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white leading-snug">
-                        <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">
+                    <div className="min-w-0 flex-1 pr-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-amber-600 dark:text-amber-400 text-xs">
                           {p.sku}
                         </span>
-                        <span className="text-gray-400 mx-1.5">—</span>
-                        <span className="text-gray-800 dark:text-gray-200">
-                          {displayName}
-                        </span>
-                      </div>
-
-                      {/* Details: Tax rate & tags */}
-                      <div className="flex items-center gap-2 mt-1.5 text-[11px] font-mono text-gray-500">
                         {p.taxRate !== undefined && (
-                          <span className="bg-gray-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-gray-600 dark:text-gray-300">
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 font-mono text-slate-500">
                             GST: {p.taxRate}%
                           </span>
                         )}
-                        {p.batchNo && (
-                          <span className="text-gray-400 truncate">
-                            Batch: {p.batchNo}
-                          </span>
-                        )}
                       </div>
+                      <p className="truncate font-medium text-slate-900 dark:text-white mt-0.5">
+                        {displayName}
+                      </p>
                     </div>
 
-                    {/* Pricing */}
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 font-mono">
                       {(p.unitCost !== undefined || p.cost !== undefined) && (
-                        <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                        <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
                           Cost: {currencySymbol}{(p.unitCost ?? p.cost)?.toFixed(2)}
                         </div>
                       )}
                       {(p.sellingPrice !== undefined || p.price !== undefined) && (
-                        <div className="text-[11px] font-mono text-gray-400 mt-0.5">
+                        <div className="text-[10px] text-slate-400 mt-0.5">
                           MRP: {currencySymbol}{(p.sellingPrice ?? p.price)?.toFixed(2)}
                         </div>
                       )}
@@ -295,15 +287,15 @@ const SkuSearchLookup: React.FC<SkuSearchLookupProps> = ({
                 );
               })
             ) : (
-              <div className="p-5 text-center text-xs text-gray-400">
-                <p>No matching SKU or product starting with "{searchTerm}"</p>
+              <div className="p-6 text-center text-xs text-slate-400 font-mono">
+                <p>No matching SKU or product found for "{searchTerm}"</p>
                 {searchTerm.trim() && (
                   <button
                     type="button"
                     onClick={() => handleSelectProduct(searchTerm.trim())}
-                    className="mt-2.5 text-xs font-semibold text-black dark:text-white underline hover:opacity-80 cursor-pointer block mx-auto font-mono"
+                    className="mt-2 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer block mx-auto"
                   >
-                    Select custom SKU "{searchTerm.trim()}"
+                    + Select custom SKU "{searchTerm.trim()}"
                   </button>
                 )}
               </div>

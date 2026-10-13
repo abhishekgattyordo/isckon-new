@@ -55,8 +55,8 @@ export const InventoryDashboard: React.FC = () => {
   // Tab State: 'batches' (Zone Inventory Batches) vs 'audit' (Stock Movement Audit Trail) vs 'configure_zones'
   const [activeTab, setActiveTab] = useState<'batches' | 'audit' | 'configure_zones'>('batches');
 
-  // Zone selection
-  const [selectedZoneId, setSelectedZoneId] = useState<string>(zones[0]?.id || 'zone-a');
+  // Zone selection ('all' or specific zone id)
+  const [selectedZoneId, setSelectedZoneId] = useState<string>('all');
 
   // Item Detail Modal State
   const [selectedProductForDetail, setSelectedProductForDetail] = useState<Product | null>(null);
@@ -91,21 +91,27 @@ export const InventoryDashboard: React.FC = () => {
   const [adjustReason, setAdjustReason] = useState('Shrinkage / Damage');
   const [adjustRefNo, setAdjustRefNo] = useState('');
 
-  // Ensure selectedZoneId syncs when zones change
-  React.useEffect(() => {
-    if (zones.length > 0 && !zones.some(z => z.id === selectedZoneId)) {
-      setSelectedZoneId(zones[0].id);
-    }
-  }, [zones, selectedZoneId]);
-
   // Get current active zone
   const activeZone = zones.find(z => z.id === selectedZoneId) || zones[0];
 
-  // Products belonging to the selected zone using robust zone matching
+  // Products belonging to the selected scope (branch aggregate or specific zone)
   const zoneProducts = React.useMemo(() => {
-    if (!activeZone) return [];
+    if (selectedZoneId === 'all') {
+      return products;
+    }
+    if (!activeZone) return products;
     return products.filter(p => isProductInZone(p, activeZone, zones));
-  }, [products, activeZone, zones]);
+  }, [products, selectedZoneId, activeZone, zones]);
+
+  // Valuation metrics across active scope
+  const totalCap = zones.reduce((acc, z) => acc + (z.capacity || 0), 0);
+  const totalOcc = zoneProducts.reduce((acc, p) => acc + (Number(p.stock) || 0), 0);
+  const overallPercent = totalCap > 0 ? Math.round((totalOcc / totalCap) * 100) : 0;
+  const quarantineCount = zoneProducts.filter(p => p.status === 'out_of_stock' || (p.warehouseZone && p.warehouseZone.toLowerCase().includes('quarantine'))).length;
+  
+  const totalInventoryCostBasis = zoneProducts.reduce((acc, p) => acc + (Number(p.cost || 0) * Number(p.stock || 0)), 0);
+  const totalInventoryRetailValue = zoneProducts.reduce((acc, p) => acc + (Number(p.price || 0) * Number(p.stock || 0)), 0);
+  const totalUnitsInStock = zoneProducts.reduce((acc, p) => acc + Number(p.stock || 0), 0);
 
   // Filter products by search query and status
   const filteredZoneProducts = zoneProducts.filter(p => {
@@ -130,14 +136,6 @@ export const InventoryDashboard: React.FC = () => {
 
     return nameMatch || skuMatch || barcodeMatch || categoryMatch || batchNoMatch || supplierMatch || editionMatch;
   });
-
-  // Global inventory stats
-  const totalCap = zones.reduce((acc, z) => acc + (z.capacity || 0), 0);
-  const totalOcc = products.reduce((acc, p) => acc + (Number(p.stock) || 0), 0);
-  const overallPercent = totalCap > 0 ? Math.round((totalOcc / totalCap) * 100) : 0;
-  const quarantineCount = products.filter(p => p.status === 'out_of_stock' || (p.warehouseZone && p.warehouseZone.toLowerCase().includes('quarantine'))).length;
-  const totalStockValue = products.reduce((acc, p) => acc + (p.price || 0) * (p.stock || 0), 0);
-  const totalCostBasis = products.reduce((acc, p) => acc + (p.cost || 0) * (p.stock || 0), 0);
 
   // Filtered movements for Audit Trail Tab
   const filteredMovements = movements.filter(m => {
@@ -354,9 +352,49 @@ export const InventoryDashboard: React.FC = () => {
             <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-widest">Facility Occupancy</span>
-                  <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-300">
+                  <span className="text-[11px] font-bold uppercase tracking-widest">Total Inventory Cost Basis</span>
+                  <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-950/50 flex items-center justify-center text-purple-600">
                     <Layers className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-white">
+                    ₹{totalInventoryCostBasis.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
+                <span>Sum(Qty × Unit Cost):</span>
+                <span className="font-bold text-purple-600 dark:text-purple-400">Active Valuation</span>
+              </div>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-widest">Total Retail Valuation</span>
+                  <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600">
+                    <Package className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-emerald-600 dark:text-emerald-400">
+                    ₹{totalInventoryRetailValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
+                <span>Total Units:</span>
+                <span className="font-bold text-slate-700 dark:text-slate-300">{totalUnitsInStock} units</span>
+              </div>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-widest">Facility Occupancy</span>
+                  <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-950/50 flex items-center justify-center text-amber-600">
+                    <Warehouse className="w-4 h-4" />
                   </div>
                 </div>
                 <div className="mt-3 flex items-baseline gap-2">
@@ -376,65 +414,55 @@ export const InventoryDashboard: React.FC = () => {
             <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-widest">Active SKUs</span>
-                  <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-300">
-                    <Package className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="mt-3 flex items-baseline gap-2">
-                  <span className="text-2xl sm:text-3xl font-bold font-mono tracking-tight text-slate-900 dark:text-white">
-                    {products.length}
-                  </span>
-                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
-                    {zones.length} Zones
-                  </span>
-                </div>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
-                <span>Cost Basis:</span>
-                <span className="font-bold text-slate-700 dark:text-slate-300">₹{(totalCostBasis / 1000).toFixed(1)}k</span>
-              </div>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-widest">Quarantine & QC</span>
-                  <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-950/50 flex items-center justify-center text-amber-600">
-                    <AlertTriangle className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="mt-3 flex items-baseline gap-2">
-                  <span className="text-2xl sm:text-3xl font-bold font-mono tracking-tight text-amber-600 dark:text-amber-400">
-                    {quarantineCount}
-                  </span>
-                  <span className="text-xs font-medium text-slate-400 font-mono">holds</span>
-                </div>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 font-medium truncate">
-                {quarantineCount > 0 ? `${quarantineCount} items require inspection` : 'No active quarantine holds'}
-              </div>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-widest">Stock Health</span>
+                  <span className="text-[11px] font-bold uppercase tracking-widest">Stock Health & Holds</span>
                   <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600">
                     <ShieldCheck className="w-4 h-4" />
                   </div>
                 </div>
                 <div className="mt-3 flex items-baseline gap-2">
                   <span className="text-2xl sm:text-3xl font-bold font-mono tracking-tight text-emerald-600 dark:text-emerald-400">
-                    {products.filter(p => p.status === 'in_stock').length}
+                    {zoneProducts.filter(p => p.status === 'in_stock').length}
                   </span>
                   <span className="text-xs font-bold text-emerald-600 uppercase tracking-wide">Healthy</span>
                 </div>
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-rose-500 font-bold">
-                <span>Action Required:</span>
-                <span className="font-mono">{products.filter(p => p.status !== 'in_stock').length} items</span>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-mono">
+                <span className="text-amber-600 font-bold">Quarantine:</span>
+                <span className="font-bold text-amber-600 dark:text-amber-400">{quarantineCount} holds</span>
               </div>
+            </div>
+          </div>
+
+          {/* Warehouse Level Filter Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-200 dark:border-purple-800">
+                <Warehouse className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">
+                  Warehouse Scope & Valuation Filter
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                  {selectedZoneId === 'all' ? 'Aggregated across all branch warehouses' : `Viewing warehouse: ${activeZone?.name}`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold text-slate-400 uppercase font-mono">Warehouse Scope:</label>
+              <select
+                value={selectedZoneId}
+                onChange={e => setSelectedZoneId(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
+              >
+                <option value="all">🌐 All Warehouses (Branch Aggregate)</option>
+                {zones.map(z => (
+                  <option key={z.id} value={z.id}>
+                    🏢 {z.name} ({z.code})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

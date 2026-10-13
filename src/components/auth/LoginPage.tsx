@@ -541,79 +541,18 @@ export const LoginPage: React.FC = () => {
                     </>
                   )}
                 </button>
-
-                {/* Direct Secondary Passcode Reset Button */}
-                <div className="flex items-center justify-center pt-1">
-                  <button
-                    type="button"
-                    onClick={handleOpenForgotModal}
-                    className="text-xs text-slate-500 hover:text-amber-700 dark:text-slate-400 dark:hover:text-amber-300 font-medium flex items-center gap-1.5 py-1 px-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
-                  >
-                    <KeyRound className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                    <span>Need to reset or change passcode? <strong className="underline decoration-amber-500 font-semibold">Click here</strong></span>
-                  </button>
-                </div>
               </form>
 
-              {/* Quick Staff Accounts Selection section */}
-              <div className="pt-4 border-t border-slate-200/50 dark:border-slate-800/80 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">
-                      ACTIVE TEMPLE STAFF ACCOUNTS ({availableUsers.length})
-                    </p>
-                    <button
-                      type="button"
-                      onClick={loadStaffAccounts}
-                      disabled={isLoadingStaff}
-                      className="p-1 rounded text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors cursor-pointer"
-                      title="Refresh active accounts from server"
-                    >
-                      <RotateCw className={`w-3 h-3 ${isLoadingStaff ? 'animate-spin text-amber-500' : ''}`} />
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleOpenForgotModal}
-                    className="text-[10px] text-amber-600 dark:text-amber-400 font-bold hover:underline cursor-pointer"
-                  >
-                    Reset Any Passcode
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2 max-h-72 overflow-y-auto pr-1">
-                  {availableUsers.map((u) => {
-                    const userBranchObj = branches.find(b => b.id === u.branchId) || branches.find(b => b.name === u.branch);
-                    const branchDisplay = userBranchObj?.city || u.branch?.split(' ')[0] || 'Store';
-                    const isMulti = u.accessibleBranchIds && u.accessibleBranchIds.length > 1;
-
-                    return (
-                      <button
-                        key={u.id || u.email}
-                        type="button"
-                        onClick={() => handleDemoLogin(u.email, u.password || '111111')}
-                        className="p-3 text-left rounded-xl bg-slate-50 dark:bg-slate-950 hover:bg-amber-500/5 dark:hover:bg-amber-500/5 border border-slate-200/60 dark:border-slate-800/60 hover:border-amber-500/40 dark:hover:border-amber-500/40 transition-colors flex items-center justify-between cursor-pointer group"
-                      >
-                        <div className="min-w-0 pr-2">
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-amber-600 transition-colors truncate">
-                              {u.name}
-                            </p>
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 shrink-0">
-                              {isMulti ? 'Multi-Branch' : branchDisplay}
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-slate-400 truncate">
-                            {u.role} • <span className="font-mono text-slate-500 dark:text-slate-400 font-semibold">{u.email}</span>
-                          </p>
-                        </div>
-                        <span className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10px] font-mono font-bold uppercase group-hover:bg-amber-500 group-hover:text-white transition-colors">
-                          Log In
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+              {/* Direct Secondary Passcode Reset Button */}
+              <div className="flex items-center justify-center pt-2 border-t border-slate-200/50 dark:border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={handleOpenForgotModal}
+                  className="text-xs text-slate-500 hover:text-amber-700 dark:text-slate-400 dark:hover:text-amber-300 font-medium flex items-center gap-1.5 py-1 px-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span>Need to reset or change passcode? <strong className="underline decoration-amber-500 font-semibold">Click here</strong></span>
+                </button>
               </div>
             </>
           )}

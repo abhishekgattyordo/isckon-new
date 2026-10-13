@@ -244,39 +244,29 @@ export const UserManagement: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Super Admin Access Management Header */}
+      {/* Staff Management Header */}
       <div className="bg-white dark:bg-slate-900 border border-[#E8E2D9] dark:border-slate-800 p-5 rounded-2xl shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-[#D97706] border border-[#FDE68A] dark:border-amber-800">
-              <ShieldCheck className="w-5 h-5 text-amber-600" />
+              <Users className="w-5 h-5 text-amber-600" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-black text-[#1F1916] dark:text-white">
-                  Super Admin Access Management Dashboard
+                  Staff & Role Management (RBAC)
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                  RBAC & Multi-Branch
+                  {users.length} Registered Accounts
                 </span>
               </div>
               <p className="text-[11px] text-[#786C65] dark:text-slate-400 mt-0.5">
-                Manage roles (Super Admin, Store Manager, Store Executive), multi-branch permissions, and account activation for {users.length} staff members.
+                Configure user roles, branch operating assignments, and system module access permissions.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-            <button
-              onClick={openCreateSuperAdminModal}
-              id="btn_create_super_admin"
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] transition-all text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer select-none"
-              title="Quickly create a new Super Admin account with full global privileges"
-            >
-              <ShieldCheck className="w-4 h-4 text-indigo-200" />
-              <span>+ Create Super Admin</span>
-            </button>
-
             <button
               onClick={openAddModal}
               id="btn_add_new_staff"
@@ -286,33 +276,6 @@ export const UserManagement: React.FC = () => {
               <span>Add New Staff</span>
             </button>
           </div>
-        </div>
-
-        {/* Super Admin & Role Setup Quick Helper Card */}
-        <div className="p-3.5 rounded-xl bg-gradient-to-r from-indigo-50/80 via-white to-amber-50/80 dark:from-indigo-950/40 dark:via-slate-900 dark:to-amber-950/40 border border-indigo-200/60 dark:border-indigo-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
-          <div className="flex items-start sm:items-center gap-2.5 min-w-0">
-            <div className="p-1.5 rounded-lg bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 shrink-0">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>How to create a Super Admin account:</span>
-                <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 px-1.5 py-0.2 rounded border border-indigo-200 dark:border-indigo-800">
-                  Global Access
-                </span>
-              </p>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                Click <strong>+ Create Super Admin</strong> or <strong>Add New Staff</strong> &rarr; select role <strong>Super Admin</strong> &rarr; enter full name, email, and passcode. Super Admins bypass all module restrictions and manage all temple branches.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={openCreateSuperAdminModal}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] transition-colors cursor-pointer whitespace-nowrap shadow-2xs shrink-0 flex items-center gap-1.5"
-          >
-            <span>⚡ Setup Super Admin</span>
-          </button>
         </div>
 
         {/* Filter Controls Bar */}

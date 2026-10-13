@@ -7,7 +7,37 @@ if (MemoryDb.products.length === 0) {
   MemoryDb.products = [...INITIAL_PRODUCTS];
 }
 
-export async function getProducts(includeDeleted = false, branchId?: string): Promise<Product[]> {
+export interface ProductQueryOptions {
+  includeDeleted?: boolean;
+  branchId?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export async function getProducts(
+  includeDeletedOrOpts: boolean | ProductQueryOptions = false,
+  branchIdArg?: string
+): Promise<any> {
+  let includeDeleted = false;
+  let branchId: string | undefined = undefined;
+  let search: string | undefined = undefined;
+  let page = 1;
+  let limit = 1000;
+  let isPaginatedRequest = false;
+
+  if (typeof includeDeletedOrOpts === 'object' && includeDeletedOrOpts !== null) {
+    includeDeleted = includeDeletedOrOpts.includeDeleted ?? false;
+    branchId = includeDeletedOrOpts.branchId;
+    search = includeDeletedOrOpts.search;
+    page = includeDeletedOrOpts.page ?? 1;
+    limit = includeDeletedOrOpts.limit ?? 20;
+    isPaginatedRequest = true;
+  } else {
+    includeDeleted = Boolean(includeDeletedOrOpts);
+    branchId = branchIdArg;
+  }
+
   try {
     if (process.env.DATABASE_URL) {
       try {
@@ -30,12 +60,29 @@ export async function getProducts(includeDeleted = false, branchId?: string): Pr
       if (branchId && branchId !== '*') {
         whereClause.branchId = branchId;
       }
+      if (search && search.trim()) {
+        const q = search.trim();
+        whereClause.OR = [
+          { sku: { contains: q, mode: 'insensitive' } },
+          { name: { contains: q, mode: 'insensitive' } },
+          { category: { contains: q, mode: 'insensitive' } },
+          { barcode: { contains: q, mode: 'insensitive' } }
+        ];
+      }
+
+      const totalCount = await prisma.product.count({
+        where: Object.keys(whereClause).length > 0 ? whereClause : undefined
+      });
+
+      const skip = (page - 1) * limit;
       const dbProducts = await prisma.product.findMany({
         where: Object.keys(whereClause).length > 0 ? whereClause : undefined,
         orderBy: { lastUpdated: 'desc' },
+        skip: isPaginatedRequest ? skip : undefined,
+        take: isPaginatedRequest ? limit : undefined,
       });
 
-      if (dbProducts && dbProducts.length > 0) {
+      if (dbProducts) {
         const mapped = dbProducts.map(p => {
           const bId = (p as any).branchId || (
             p.sku?.startsWith('MGL-') || p.warehouseZone?.includes('Mangalore') ? 'branch-mangalore' :
@@ -81,71 +128,71 @@ export async function getProducts(includeDeleted = false, branchId?: string): Pr
           };
         });
 
+        let filtered = mapped;
         if (branchId && branchId !== '*') {
-          return mapped.filter(p => {
+          filtered = filtered.filter(p => {
             if (p.branchId === branchId) return true;
             if (branchId === 'branch-bangalore' && (p.sku?.startsWith('BLR-') || p.branchName?.toLowerCase().includes('bangalore') || p.warehouseZone?.toLowerCase().includes('bangalore'))) return true;
             if (branchId === 'branch-mangalore' && (p.sku?.startsWith('MGL-') || p.branchName?.toLowerCase().includes('mangalore') || p.warehouseZone?.toLowerCase().includes('mangalore'))) return true;
             return false;
           });
         }
-        return mapped;
-      }
 
-      // Auto-seed initial catalog into database if database products table is empty
-      if (!includeDeleted) {
-        for (const p of INITIAL_PRODUCTS) {
-          try {
-            await prisma.product.upsert({
-              where: { id: p.id },
-              update: {},
-              create: {
-                id: p.id,
-                sku: p.sku,
-                name: p.name,
-                category: p.category,
-                price: p.price,
-                cost: p.cost,
-                stock: p.stock,
-                minStock: p.minStock,
-                warehouseZone: p.warehouseZone,
-                batchNo: p.batchNo || '',
-                barcode: p.barcode || '',
-                imageUrl: p.imageUrl || '',
-                status: p.status,
-                supplier: p.supplier || '',
-                rating: p.rating || 5,
-                description: p.description || '',
-                tags: p.tags || [],
-                branchId: p.branchId || 'branch-mayapur-hq',
-                branchName: p.branchName || 'Mayapur HQ Central',
-                isDeleted: false
-              }
-            });
-          } catch (e) {}
+        const finalTotal = isPaginatedRequest ? totalCount : filtered.length;
+        const totalPages = Math.ceil(finalTotal / limit) || 1;
+
+        if (isPaginatedRequest) {
+          return {
+            products: filtered,
+            totalCount: finalTotal,
+            page,
+            limit,
+            totalPages
+          };
         }
-        let seeded = [...INITIAL_PRODUCTS];
-        if (branchId && branchId !== '*') {
-          seeded = seeded.filter(p => p.branchId === branchId);
-        }
-        return seeded;
+        return filtered;
       }
     }
   } catch (error) {
-    console.warn('Prisma getProducts failed:', error);
+    console.warn('Prisma getProducts failed, falling back to MemoryDb:', error);
   }
 
-  const list = MemoryDb.products.length > 0 ? MemoryDb.products : INITIAL_PRODUCTS;
-  let res = includeDeleted ? list : list.filter(p => !p.isDeleted);
+  let list = MemoryDb.products && MemoryDb.products.length > 0 ? MemoryDb.products : INITIAL_PRODUCTS;
+  let filtered = includeDeleted ? list : list.filter(p => !p.isDeleted);
   if (branchId && branchId !== '*') {
-    res = res.filter(p => {
+    filtered = filtered.filter(p => {
       if (p.branchId === branchId) return true;
       if (branchId === 'branch-bangalore' && (p.sku?.startsWith('BLR-') || p.branchName?.toLowerCase().includes('bangalore') || p.warehouseZone?.toLowerCase().includes('bangalore'))) return true;
       if (branchId === 'branch-mangalore' && (p.sku?.startsWith('MGL-') || p.branchName?.toLowerCase().includes('mangalore') || p.warehouseZone?.toLowerCase().includes('mangalore'))) return true;
       return false;
     });
   }
-  return res;
+  if (search && search.trim()) {
+    const q = search.trim().toLowerCase();
+    filtered = filtered.filter(p =>
+      p.sku?.toLowerCase().includes(q) ||
+      p.name?.toLowerCase().includes(q) ||
+      p.category?.toLowerCase().includes(q) ||
+      p.barcode?.toLowerCase().includes(q)
+    );
+  }
+
+  const totalCount = filtered.length;
+  const totalPages = Math.ceil(totalCount / limit) || 1;
+  const paginated = isPaginatedRequest ? filtered.slice((page - 1) * limit, page * limit) : filtered;
+
+  if (isPaginatedRequest) {
+    return {
+      products: paginated,
+      totalCount,
+      page,
+      limit,
+      totalPages
+    };
+  }
+  return paginated;
+
+
 }
 
 export async function getDeletedProducts(): Promise<Product[]> {
