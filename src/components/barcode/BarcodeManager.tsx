@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useERP } from '../../context/ERPContext';
 import { BarcodeView } from './BarcodeView';
-import { Product } from '../../types';
+import { Product, BarcodeRecord } from '../../types';
 import {
   QrCode,
   Printer,
@@ -19,8 +19,24 @@ import {
   Check,
   Filter,
   CheckSquare,
-  Square
+  Square,
+  FileSpreadsheet,
+  Boxes,
+  RefreshCw,
+  IndianRupee,
+  Package,
+  X,
+  ExternalLink,
+  SlidersHorizontal,
+  Info
 } from 'lucide-react';
+import {
+  printHtmlDocument,
+  buildProductLabelsHtml,
+  buildBulkLabelsHtml,
+  buildBarcodeRecordsLabelsHtml
+} from '../../lib/printUtils';
+import { exportBarcodesToPdf } from '../../lib/exportUtils';
 
 interface ProductSearchComboboxProps {
   selectedProductId: string;
@@ -91,7 +107,9 @@ const ProductSearchCombobox: React.FC<ProductSearchComboboxProps> = ({
         <div className="flex items-center gap-2 min-w-0 text-left">
           <Tag className="w-4 h-4 text-rose-500 shrink-0" />
           <span className="truncate">
-            {selectedProd ? `${selectedProd.sku} — ${selectedProd.name} (₹${Number(selectedProd.price).toFixed(2)})` : 'Search & select product SKU...'}
+            {selectedProd
+              ? `${selectedProd.sku} — ${selectedProd.name} (₹${Number(selectedProd.price).toFixed(2)})`
+              : 'Search & select product SKU...'}
           </span>
         </div>
         <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
@@ -159,38 +177,62 @@ const ProductSearchCombobox: React.FC<ProductSearchComboboxProps> = ({
 };
 
 export const BarcodeManager: React.FC = () => {
-  const { products, barcodes, addBarcodeRecord, quickNotification, settings, currentBranch } = useERP();
+  const {
+    products,
+    barcodes,
+    addBarcodeRecord,
+    quickNotification,
+    settings,
+    currentBranch,
+    inwardNotes,
+    batches
+  } = useERP();
+
+  // 1. Two Primary Views: 'batch_grn' | 'single_sku'
+  const [activeView, setActiveView] = useState<'batch_grn' | 'single_sku'>('batch_grn');
+
+  // Single SKU Generator State
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(products[0] || null);
   const [stickerType, setStickerType] = useState<'standard' | 'shelf' | 'jewel'>('standard');
   const [printCount, setPrintCount] = useState(24);
   const [customSerial, setCustomSerial] = useState('ISK-2026-8849');
   const [isPrinting, setIsPrinting] = useState(false);
 
-  // New states for category filtering, unprinted items, and bulk selection
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
-  const [unprintedOnly, setUnprintedOnly] = useState<boolean>(false);
+  // Batch & GRN Bulk Manager State
+  const [selectedGrnFilter, setSelectedGrnFilter] = useState<string>('all');
+  const [selectedBatchFilter, setSelectedBatchFilter] = useState<string>('all');
   const [searchFilter, setSearchFilter] = useState<string>('');
-  const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([]);
+  const [selectedBarcodeIds, setSelectedBarcodeIds] = useState<string[]>([]);
+  const [repeatByQuantity, setRepeatByQuantity] = useState<boolean>(true);
+  const [customPrintQuantities, setCustomPrintQuantities] = useState<Record<string, number>>({});
+  const [copiedBarcode, setCopiedBarcode] = useState<string | null>(null);
 
-  const categories = ['All', ...Array.from(new Set(products.map(p => p.category)))];
+  // Requirement 3: Check sessionStorage for active_grn_filter on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const activeGrn = sessionStorage.getItem('active_grn_filter');
+      if (activeGrn) {
+        setSelectedGrnFilter(activeGrn);
+        setActiveView('batch_grn');
+        // Auto-select all barcodes that correspond to this GRN
+        const matchingIds = barcodes
+          .filter(b => b.grnNumber === activeGrn)
+          .map(b => b.id);
 
-  // Helper to check if a product has been printed (exists in barcodes records)
-  const isProductPrinted = (sku: string) => {
-    return barcodes.some(b => b.sku.toLowerCase() === sku.toLowerCase());
-  };
+        if (matchingIds.length > 0) {
+          setSelectedBarcodeIds(matchingIds);
+        }
 
-  // Filtered products list for bulk view
-  const filteredCatalogProducts = products.filter(p => {
-    if (!p) return false;
-    const matchesCat = selectedCategoryFilter === 'All' || p.category === selectedCategoryFilter;
-    const matchesSearch = searchFilter.trim() === '' ||
-      p.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      p.sku.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      (p.barcode && p.barcode.includes(searchFilter));
-    const isUnprinted = unprintedOnly ? !isProductPrinted(p.sku) : true;
-    return matchesCat && matchesSearch && isUnprinted;
-  });
+        quickNotification(
+          'GRN Barcodes Auto-Loaded',
+          `Viewing batch barcodes generated for ${activeGrn}. Ready for print or PDF export.`,
+          'info'
+        );
+      }
+    }
+  }, [barcodes.length]);
 
+  // When products change or selected product changes in Single SKU
   const selectedProd = selectedProduct || products[0] || {
     id: 'prod-fallback',
     sku: 'SKU-001',
@@ -213,477 +255,964 @@ export const BarcodeManager: React.FC = () => {
     }
   }, [selectedProd?.id]);
 
-  const handlePrint = () => {
+  // Combine and consolidate all printable barcode items (from barcodes records and inward items fallback)
+  const allPrintableBarcodes: BarcodeRecord[] = useMemo(() => {
+    // If barcodes array has entries, use them as primary
+    if (barcodes && barcodes.length > 0) {
+      return barcodes;
+    }
+    // Fallback: build barcode records dynamically from inwardNotes and products
+    const derived: BarcodeRecord[] = [];
+    inwardNotes.forEach(note => {
+      note.items.forEach((item, idx) => {
+        const prod = products.find(p => p.sku === item.sku);
+        derived.push({
+          id: `derived-bar-${note.id}-${idx}`,
+          sku: item.sku,
+          productName: item.name,
+          barcodeValue: prod?.barcode || `890${Math.abs(item.sku.split('').reduce((a, c) => a + c.charCodeAt(0), 0) * 1000).toString().slice(0, 10)}`,
+          format: 'code128',
+          template: 'retail_tag_1x2',
+          generatedAt: note.timestamp || new Date().toISOString(),
+          batchNo: item.batchNo || `BAT-${note.grnNumber}`,
+          grnNumber: note.grnNumber,
+          purchaseCost: item.unitCost,
+          sellingPrice: item.sellingPrice || (prod?.price || item.unitCost * 1.5),
+          printCount: item.quantity,
+          branchId: note.branchId,
+          branchName: note.branchName
+        });
+      });
+    });
+    return derived;
+  }, [barcodes, inwardNotes, products]);
+
+  // Filtered barcodes for Batch & GRN Bulk Manager table
+  const filteredBarcodes = useMemo(() => {
+    return allPrintableBarcodes.filter(b => {
+      const matchesGrn = selectedGrnFilter === 'all' || b.grnNumber === selectedGrnFilter;
+      const matchesBatch = selectedBatchFilter === 'all' || b.batchNo === selectedBatchFilter;
+      const matchesSearch =
+        searchFilter.trim() === '' ||
+        b.sku.toLowerCase().includes(searchFilter.toLowerCase()) ||
+        b.productName.toLowerCase().includes(searchFilter.toLowerCase()) ||
+        b.barcodeValue.includes(searchFilter) ||
+        (b.grnNumber && b.grnNumber.toLowerCase().includes(searchFilter.toLowerCase())) ||
+        (b.batchNo && b.batchNo.toLowerCase().includes(searchFilter.toLowerCase()));
+
+      return matchesGrn && matchesBatch && matchesSearch;
+    });
+  }, [allPrintableBarcodes, selectedGrnFilter, selectedBatchFilter, searchFilter]);
+
+  // Helper to get effective print quantity for a barcode record
+  const getBarcodePrintQty = (b: BarcodeRecord): number => {
+    if (customPrintQuantities[b.id] !== undefined) {
+      return customPrintQuantities[b.id];
+    }
+    // If repeatByQuantity is enabled, default to the inward printCount/quantity
+    return repeatByQuantity ? (b.printCount || 1) : 1;
+  };
+
+  const setBarcodePrintQty = (bId: string, qty: number) => {
+    setCustomPrintQuantities(prev => ({
+      ...prev,
+      [bId]: Math.max(1, qty)
+    }));
+  };
+
+  // Toggle selection
+  const toggleSelectAll = () => {
+    if (selectedBarcodeIds.length === filteredBarcodes.length) {
+      setSelectedBarcodeIds([]);
+    } else {
+      setSelectedBarcodeIds(filteredBarcodes.map(b => b.id));
+    }
+  };
+
+  const toggleBarcodeSelection = (id: string) => {
+    if (selectedBarcodeIds.includes(id)) {
+      setSelectedBarcodeIds(selectedBarcodeIds.filter(i => i !== id));
+    } else {
+      setSelectedBarcodeIds([...selectedBarcodeIds, id]);
+    }
+  };
+
+  // Total labels in selected set
+  const totalSelectedLabelsCount = useMemo(() => {
+    return filteredBarcodes
+      .filter(b => selectedBarcodeIds.includes(b.id))
+      .reduce((sum, b) => sum + getBarcodePrintQty(b), 0);
+  }, [filteredBarcodes, selectedBarcodeIds, customPrintQuantities, repeatByQuantity]);
+
+  // Handle Bulk Printing from Batch & GRN Manager
+  const handleBulkPrintFromTable = () => {
+    const itemsToPrint = filteredBarcodes.filter(b => selectedBarcodeIds.includes(b.id));
+    if (itemsToPrint.length === 0) {
+      quickNotification('Selection Required', 'Please select at least one barcode item to print.', 'alert');
+      return;
+    }
+
+    setIsPrinting(true);
+    const quantitiesMap: Record<string, number> = {};
+    itemsToPrint.forEach(b => {
+      quantitiesMap[b.id] = getBarcodePrintQty(b);
+    });
+
+    const html = buildBarcodeRecordsLabelsHtml(
+      itemsToPrint.map(b => ({
+        id: b.id,
+        sku: b.sku,
+        productName: b.productName,
+        barcodeValue: b.barcodeValue,
+        batchNo: b.batchNo,
+        grnNumber: b.grnNumber,
+        sellingPrice: b.sellingPrice,
+        purchaseCost: b.purchaseCost
+      })),
+      quantitiesMap,
+      settings?.orgName || 'ISKCON FOUNDATION',
+      stickerType
+    );
+
+    printHtmlDocument(html, `Bulk_Barcodes_${itemsToPrint.length}_Items`);
+    quickNotification(
+      'Thermal Print Dispatched',
+      `Sent ${totalSelectedLabelsCount} barcode labels for ${itemsToPrint.length} batches to printer.`,
+      'success'
+    );
+
+    setTimeout(() => setIsPrinting(false), 800);
+  };
+
+  // Handle Bulk PDF Export from Batch & GRN Manager
+  const handleBulkExportPdf = () => {
+    const itemsToExport = filteredBarcodes.filter(b => selectedBarcodeIds.includes(b.id));
+    if (itemsToExport.length === 0) {
+      quickNotification('Selection Required', 'Please select at least one barcode item for PDF export.', 'alert');
+      return;
+    }
+
+    const exportData = itemsToExport.map(b => ({
+      sku: b.sku,
+      productName: b.productName,
+      barcodeValue: b.barcodeValue,
+      batchNo: b.batchNo,
+      grnNumber: b.grnNumber,
+      purchaseCost: b.purchaseCost,
+      sellingPrice: b.sellingPrice,
+      quantity: getBarcodePrintQty(b)
+    }));
+
+    exportBarcodesToPdf(exportData, {
+      title: 'GRN Batch Barcodes Export',
+      orgName: settings?.orgName || 'ISKCON FOUNDATION',
+      repeatByQuantity: true,
+      layout: stickerType,
+      filename: `Barcodes_${selectedGrnFilter !== 'all' ? selectedGrnFilter : 'Bulk'}_${new Date().toISOString().slice(0, 10)}.pdf`
+    });
+
+    quickNotification(
+      'PDF Export Downloaded',
+      `Exported ${totalSelectedLabelsCount} printable stickers to PDF file.`,
+      'success'
+    );
+  };
+
+  // Single Item Print from Table
+  const handleSingleItemPrint = (b: BarcodeRecord) => {
+    const qty = getBarcodePrintQty(b);
+    const html = buildBarcodeRecordsLabelsHtml(
+      [{
+        id: b.id,
+        sku: b.sku,
+        productName: b.productName,
+        barcodeValue: b.barcodeValue,
+        batchNo: b.batchNo,
+        grnNumber: b.grnNumber,
+        sellingPrice: b.sellingPrice,
+        purchaseCost: b.purchaseCost
+      }],
+      { [b.id]: qty },
+      settings?.orgName || 'ISKCON FOUNDATION',
+      stickerType
+    );
+
+    printHtmlDocument(html, `Barcode_${b.sku}_x${qty}`);
+    quickNotification('Print Dispatched', `Printed ${qty} labels for SKU ${b.sku}.`, 'success');
+  };
+
+  // Single Item PDF Export from Table
+  const handleSingleItemPdf = (b: BarcodeRecord) => {
+    const qty = getBarcodePrintQty(b);
+    exportBarcodesToPdf(
+      [{
+        sku: b.sku,
+        productName: b.productName,
+        barcodeValue: b.barcodeValue,
+        batchNo: b.batchNo,
+        grnNumber: b.grnNumber,
+        purchaseCost: b.purchaseCost,
+        sellingPrice: b.sellingPrice,
+        quantity: qty
+      }],
+      {
+        orgName: settings?.orgName || 'ISKCON FOUNDATION',
+        repeatByQuantity: true,
+        layout: stickerType,
+        filename: `Barcode_${b.sku}_${b.batchNo}.pdf`
+      }
+    );
+    quickNotification('PDF Downloaded', `Exported barcode for SKU ${b.sku} to PDF.`, 'success');
+  };
+
+  // Single SKU Generator Print Handler
+  const handleSingleSkuPrint = () => {
     setIsPrinting(true);
     addBarcodeRecord({
       sku: selectedProd?.sku || 'SKU-001',
-      barcodeValue: selectedProd?.barcode || '1234567890123',
+      barcodeValue: selectedProd?.barcode || '8901234002039',
       productName: selectedProd?.name || 'Devotional Book Item',
       format: 'code128',
       template: (stickerType === 'standard' ? 'retail_tag_1x2' : stickerType === 'shelf' ? 'shelf_label_2x3' : 'jewelry_hangtag'),
       generatedAt: new Date().toISOString(),
       batchNo: customSerial,
+      sellingPrice: selectedProd?.price,
+      purchaseCost: selectedProd?.cost,
       printCount: printCount
     });
 
-    setTimeout(() => {
-      setIsPrinting(false);
-      quickNotification('Stickers Dispatched', `Sent ${printCount} barcode tags (${stickerType.toUpperCase()}) to thermal printer.`, 'success');
-      
-      const printSection = document.getElementById('print-section');
-      if (printSection) {
-        const printClone = printSection.cloneNode(true) as HTMLElement;
-        printClone.id = 'print-section-active';
-        printClone.classList.remove('hidden');
-        printClone.classList.add('active-print-element');
-        document.body.appendChild(printClone);
-        
-        document.body.classList.add('print-labels-only');
-        
-        const pageStyle = document.createElement('style');
-        pageStyle.id = 'dynamic-print-page-style';
-        pageStyle.innerHTML = `@page { size: auto; margin: 3mm; }`;
-        document.head.appendChild(pageStyle);
-        
-        window.print();
-        
-        setTimeout(() => {
-          printClone.remove();
-          document.body.classList.remove('print-labels-only');
-          const pStyle = document.getElementById('dynamic-print-page-style');
-          if (pStyle) pStyle.remove();
-        }, 500);
-      } else {
-        window.print();
+    quickNotification('Stickers Dispatched', `Sent ${printCount} barcode tags (${stickerType.toUpperCase()}) to thermal printer.`, 'success');
+
+    const html = buildProductLabelsHtml(
+      selectedProd,
+      printCount,
+      settings?.orgName || 'ISKCON FOUNDATION',
+      customSerial
+    );
+    printHtmlDocument(html, `Barcode_Labels_${selectedProd.sku}`);
+
+    setTimeout(() => setIsPrinting(false), 800);
+  };
+
+  // Single SKU Generator PDF Export Handler
+  const handleSingleSkuPdf = () => {
+    exportBarcodesToPdf(
+      [{
+        sku: selectedProd?.sku || 'SKU-001',
+        productName: selectedProd?.name || 'Devotional Item',
+        barcodeValue: selectedProd?.barcode || '8901234002039',
+        batchNo: customSerial,
+        purchaseCost: selectedProd?.cost,
+        sellingPrice: selectedProd?.price,
+        quantity: printCount
+      }],
+      {
+        orgName: settings?.orgName || 'ISKCON FOUNDATION',
+        repeatByQuantity: true,
+        layout: stickerType,
+        filename: `Barcode_${selectedProd.sku}_x${printCount}.pdf`
       }
-    }, 1000);
+    );
+    quickNotification('PDF Exported', `Generated PDF with ${printCount} sticker labels for SKU ${selectedProd.sku}.`, 'success');
   };
 
-  const handleBulkPrint = () => {
-    const itemsToPrint = filteredCatalogProducts.filter(p => selectedBulkIds.includes(p.id));
-    if (itemsToPrint.length === 0) {
-      quickNotification('Selection Required', 'Please select at least one product from the catalog list for bulk printing.', 'alert');
-      return;
-    }
-
-    setIsPrinting(true);
-    itemsToPrint.forEach(p => {
-      addBarcodeRecord({
-        sku: p.sku,
-        barcodeValue: p.barcode || '8901234002039',
-        productName: p.name,
-        format: 'code128',
-        template: (stickerType === 'standard' ? 'retail_tag_1x2' : stickerType === 'shelf' ? 'shelf_label_2x3' : 'jewelry_hangtag'),
-        generatedAt: new Date().toISOString(),
-        batchNo: p.batchNo || customSerial,
-        printCount: 12
-      });
-    });
-
-    setTimeout(() => {
-      setIsPrinting(false);
-      quickNotification('Bulk Sheets Dispatched', `Generated printable barcode label sheets for ${itemsToPrint.length} products.`, 'success');
-
-      const bulkPrintSection = document.getElementById('bulk-print-section');
-      if (bulkPrintSection) {
-        const clone = bulkPrintSection.cloneNode(true) as HTMLElement;
-        clone.id = 'bulk-print-active';
-        clone.classList.remove('hidden');
-        clone.classList.add('active-print-element');
-        document.body.appendChild(clone);
-        document.body.classList.add('print-labels-only');
-
-        window.print();
-
-        setTimeout(() => {
-          clone.remove();
-          document.body.classList.remove('print-labels-only');
-        }, 500);
-      } else {
-        window.print();
-      }
-    }, 1000);
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedBulkIds.length === filteredCatalogProducts.length) {
-      setSelectedBulkIds([]);
-    } else {
-      setSelectedBulkIds(filteredCatalogProducts.map(p => p.id));
+  // Copy barcode to clipboard
+  const copyBarcodeToClipboard = (val: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(val);
+      setCopiedBarcode(val);
+      setTimeout(() => setCopiedBarcode(null), 2000);
+      quickNotification('Barcode Copied', `Copied barcode "${val}" to clipboard.`, 'info');
     }
   };
 
-  const toggleBulkItem = (id: string) => {
-    if (selectedBulkIds.includes(id)) {
-      setSelectedBulkIds(selectedBulkIds.filter(i => i !== id));
-    } else {
-      setSelectedBulkIds([...selectedBulkIds, id]);
+  // Clear GRN filter from sessionStorage and local state
+  const handleClearGrnFilter = () => {
+    setSelectedGrnFilter('all');
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('active_grn_filter');
     }
   };
+
+  // Distinct batches and GRNs for dropdowns
+  const distinctGrnNumbers = useMemo(() => {
+    const set = new Set<string>();
+    inwardNotes.forEach(n => { if (n.grnNumber) set.add(n.grnNumber); });
+    allPrintableBarcodes.forEach(b => { if (b.grnNumber) set.add(b.grnNumber); });
+    return Array.from(set);
+  }, [inwardNotes, allPrintableBarcodes]);
+
+  const distinctBatchNumbers = useMemo(() => {
+    const set = new Set<string>();
+    batches.forEach(b => { if (b.batchNo) set.add(b.batchNo); });
+    allPrintableBarcodes.forEach(b => { if (b.batchNo) set.add(b.batchNo); });
+    return Array.from(set);
+  }, [batches, allPrintableBarcodes]);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto font-sans">
-      {/* Header */}
-      <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <QrCode className="w-6 h-6 text-rose-500 shrink-0" />
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-              Barcode & Label Sticker Generator
-            </h1>
-            <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono text-[10px] font-bold border border-rose-500/20">
-              CODE-128 & QR READY
-            </span>
+    <div className="space-y-6 max-w-7xl mx-auto font-sans pb-16">
+      {/* Top Banner Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+            <QrCode className="w-6 h-6" />
           </div>
-          <p className="text-xs text-slate-400 mt-1 font-mono">
-            THERMAL STICKER EXPORT • SHELF LABELS • BULK PRINTING • UNPRINTED FILTER
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Controls (6 Cols) */}
-        <div className="lg:col-span-6 space-y-6">
-          <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
-            <h2 className="font-bold text-base text-slate-900 dark:text-white font-display flex items-center gap-2">
-              <Tag className="w-4 h-4 text-rose-500" />
-              <span>1. Select Merchandise SKU</span>
-            </h2>
-
-            <div className="space-y-2">
-              <label className="text-[11px] font-mono font-bold text-slate-400 uppercase">Product Catalog Target</label>
-              <ProductSearchCombobox
-                selectedProductId={selectedProd.id}
-                onSelect={(p) => setSelectedProduct(p)}
-                branchId={currentBranch?.id}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-[11px] font-mono font-bold text-slate-400 uppercase">Barcode Value</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={selectedProd?.barcode || '88491029384'}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-mono font-bold text-slate-600 dark:text-slate-300 border border-transparent"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[11px] font-mono font-bold text-slate-400 uppercase">Custom Prefix / Batch</label>
-                <input
-                  type="text"
-                  value={customSerial}
-                  onChange={e => setCustomSerial(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <h3 className="font-bold text-xs font-mono text-slate-400 uppercase">2. Sticker Dimensions & Format</h3>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'standard', name: '1" x 2" Standard Tag', desc: 'Books & Apparel' },
-                  { id: 'shelf', name: '2" x 4" Shelf Label', desc: 'Aisle Headers' },
-                  { id: 'jewel', name: '0.5" x 1.5" Mini Tag', desc: 'Japa Mala & Beads' },
-                ].map(type => (
-                  <button
-                    key={type.id}
-                    onClick={() => setStickerType(type.id as any)}
-                    className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
-                      stickerType === type.id
-                        ? 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 font-bold shadow-sm'
-                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="text-xs font-bold font-mono">{type.name}</span>
-                    <span className="text-[10px] text-slate-400 mt-1">{type.desc}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <div className="flex justify-between items-center">
-                <label className="text-[11px] font-mono font-bold text-slate-400 uppercase">3. Quantity to Print</label>
-                <span className="font-mono font-bold text-rose-500 text-sm">{printCount} stickers</span>
-              </div>
-              <input
-                type="range"
-                min="4"
-                max="100"
-                step="4"
-                value={printCount}
-                onChange={e => setPrintCount(Number(e.target.value))}
-                className="w-full accent-rose-500 cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] font-mono text-slate-400">
-                <span>4 (1 row)</span>
-                <span>24 (1 sheet)</span>
-                <span>100 (bulk roll)</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handlePrint}
-              disabled={isPrinting}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-600 text-white font-bold text-xs tracking-wider uppercase shadow-lg shadow-rose-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 disabled:opacity-50"
-            >
-              {isPrinting ? (
-                <>
-                  <Sparkles className="w-4 h-4 animate-spin" />
-                  <span>Generating Thermal Print Stream...</span>
-                </>
-              ) : (
-                <>
-                  <Printer className="w-4 h-4" />
-                  <span>Print {printCount} Labels Now</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Right Preview (6 Cols) */}
-        <div className="lg:col-span-6 sticky top-6">
-          <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-slate-400 uppercase">Live Print Sheet Preview</span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold">
-                DPI: 300 THERMAL
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+                Barcode & Label Management
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-700 dark:text-rose-400 font-mono text-[11px] font-bold border border-rose-500/20">
+                EAN-13 & CODE-128
               </span>
             </div>
-
-            <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 grid grid-cols-2 gap-3 max-h-[420px] overflow-y-auto">
-              {Array.from({ length: Math.min(4, printCount) }).map((_, idx) => (
-                <div key={idx} className="bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between space-y-2">
-                  <div className="flex justify-between items-center text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300">
-                    <span>{settings.orgName || 'ISKCON FOUNDATION'}</span>
-                    <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded">₹{Number(selectedProd.price).toFixed(2)}</span>
-                  </div>
-                  <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{selectedProd.name}</p>
-                  <div className="py-1 flex justify-center">
-                    <BarcodeView value={selectedProd.barcode || '8901234002039'} width={1.2} height={34} fontSize={10} />
-                  </div>
-                  <div className="flex justify-between items-center text-[9px] font-mono text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800">
-                    <span>SKU: {selectedProd.sku}</span>
-                    <span>BATCH: {customSerial}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p className="text-[11px] text-center text-slate-400 font-mono">
-              + {Math.max(0, printCount - 4)} additional identical stickers ready on sheet...
+            <p className="text-xs text-slate-400 mt-1 font-mono uppercase tracking-wider">
+              MATERIAL INWARD INTEGRATION • BATCH-LEVEL PRICE TRACKING • THERMAL & PDF EXPORT
             </p>
           </div>
         </div>
+
+        {/* Primary View Switch Tabs */}
+        <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-xs shrink-0">
+          <button
+            onClick={() => setActiveView('batch_grn')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all cursor-pointer ${
+              activeView === 'batch_grn'
+                ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Boxes className="w-4 h-4" />
+            <span>Batch & GRN Bulk Manager</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-rose-500/10 text-rose-600 text-[10px]">
+              {allPrintableBarcodes.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveView('single_sku')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all cursor-pointer ${
+              activeView === 'single_sku'
+                ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Tag className="w-4 h-4" />
+            <span>Single SKU Generator</span>
+          </button>
+        </div>
       </div>
 
-      {/* Category Filtering & Bulk Printing Section */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+      {/* KPI Stats Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 font-mono">
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
           <div>
-            <h2 className="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-rose-500" />
-              <span>Category Filtering & Unprinted Items Bulk Print</span>
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5 font-mono">
-              Filter products by category (e.g. Sandalwood, Books) and highlight items lacking printed barcode labels for batch generation.
-            </p>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Generated Barcodes</span>
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-white mt-1">
+              {allPrintableBarcodes.length} <span className="text-xs text-slate-400 font-normal">records</span>
+            </div>
           </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleBulkPrint}
-              disabled={selectedBulkIds.length === 0 || isPrinting}
-              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-md shadow-rose-500/20 cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Bulk Print Label Sheets ({selectedBulkIds.length})</span>
-            </button>
+          <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center">
+            <BarcodeIcon className="w-5 h-5" />
           </div>
         </div>
 
-        {/* Filter Toolbar */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-          <div className="md:col-span-4 relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-            <input
-              type="text"
-              placeholder="Search catalog by title, SKU, barcode..."
-              value={searchFilter}
-              onChange={e => setSearchFilter(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
-            />
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Inward GRN Batches</span>
+            <div className="text-2xl font-extrabold text-amber-600 dark:text-amber-400 mt-1">
+              {distinctGrnNumbers.length} <span className="text-xs text-slate-400 font-normal">shipments</span>
+            </div>
           </div>
-
-          <div className="md:col-span-3 flex items-center gap-2">
-            <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-            <select
-              value={selectedCategoryFilter}
-              onChange={e => setSelectedCategoryFilter(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-white focus:outline-none"
-            >
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat === 'All' ? 'All Categories (Sandalwood, Books, etc.)' : cat}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="md:col-span-5 flex items-center justify-between md:justify-end gap-3">
-            <label className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-xl cursor-pointer">
-              <input
-                type="checkbox"
-                checked={unprintedOnly}
-                onChange={e => setUnprintedOnly(e.target.checked)}
-                className="accent-rose-500 w-4 h-4 rounded"
-              />
-              <span className="text-xs font-mono font-bold text-amber-700 dark:text-amber-300">Highlight Unprinted Items Only</span>
-            </label>
-
-            <button
-              onClick={toggleSelectAll}
-              className="text-xs font-mono text-rose-600 dark:text-rose-400 hover:underline px-2 py-1"
-            >
-              {selectedBulkIds.length === filteredCatalogProducts.length ? 'Deselect All' : 'Select All Filtered'}
-            </button>
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+            <FileSpreadsheet className="w-5 h-5" />
           </div>
         </div>
 
-        {/* Catalog Table */}
-        <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-          <div className="max-h-96 overflow-y-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 dark:bg-slate-950 text-[10px] font-mono uppercase text-slate-400 sticky top-0 border-b border-slate-200 dark:border-slate-800">
-                <tr>
-                  <th className="p-3 w-10 text-center">
-                    <input
-                      type="checkbox"
-                      checked={selectedBulkIds.length > 0 && selectedBulkIds.length === filteredCatalogProducts.length}
-                      onChange={toggleSelectAll}
-                      className="accent-rose-500 w-4 h-4 rounded"
-                    />
-                  </th>
-                  <th className="p-3">SKU & Product Name</th>
-                  <th className="p-3">Category</th>
-                  <th className="p-3">Barcode</th>
-                  <th className="p-3">Price</th>
-                  <th className="p-3">Label Print Status</th>
-                  <th className="p-3 text-right">Quick Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs">
-                {filteredCatalogProducts.length > 0 ? (
-                  filteredCatalogProducts.map(p => {
-                    const printed = isProductPrinted(p.sku);
-                    const isChecked = selectedBulkIds.includes(p.id);
-                    return (
-                      <tr key={p.id} className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 ${isChecked ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''}`}>
-                        <td className="p-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => toggleBulkItem(p.id)}
-                            className="accent-rose-500 w-4 h-4 rounded"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <div className="font-mono font-bold text-rose-600 dark:text-rose-400">{p.sku}</div>
-                          <div className="font-semibold text-slate-900 dark:text-white">{p.name}</div>
-                        </td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px] text-slate-600 dark:text-slate-300">
-                            {p.category}
-                          </span>
-                        </td>
-                        <td className="p-3 font-mono text-slate-600 dark:text-slate-300">{p.barcode || '—'}</td>
-                        <td className="p-3 font-mono font-bold">₹{Number(p.price).toFixed(2)}</td>
-                        <td className="p-3">
-                          {printed ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold">
-                              <CheckCircle2 className="w-3 h-3" /> Printed
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-mono font-bold">
-                              ⚠️ Unprinted Label
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right">
-                          <button
-                            onClick={() => {
-                              setSelectedProduct(p);
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }}
-                            className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-rose-500 hover:text-white rounded-lg text-slate-700 dark:text-slate-300 text-[11px] font-mono transition-colors"
-                          >
-                            Configure & Print
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-400 text-xs">
-                      No matching products found for category "{selectedCategoryFilter}" {unprintedOnly ? '(Unprinted only)' : ''}.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Inventory Batches</span>
+            <div className="text-2xl font-extrabold text-blue-600 dark:text-blue-400 mt-1">
+              {distinctBatchNumbers.length} <span className="text-xs text-slate-400 font-normal">batches</span>
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
+            <Layers className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Workspace</span>
+            <div className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 mt-1 truncate max-w-[150px]">
+              {currentBranch?.name || 'Mayapur HQ Central'}
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+            <Package className="w-5 h-5" />
           </div>
         </div>
       </div>
 
-      {/* Hidden Print Section for Single Label Print */}
-      <div id="print-section" className="hidden">
-        <div className="p-4 grid grid-cols-2 gap-4 max-w-[800px] mx-auto">
-          {Array.from({ length: printCount }).map((_, idx) => (
-            <div key={idx} className="bg-white p-4 border border-black rounded flex flex-col justify-between space-y-2 page-break-inside-avoid">
-              <div className="flex justify-between items-center text-xs font-mono font-bold text-black">
-                <span>{settings.orgName || 'ISKCON FOUNDATION'}</span>
-                <span>₹{Number(selectedProd.price).toFixed(2)}</span>
+      {/* VIEW 1: BATCH & GRN BULK MANAGER (`batch_grn`) */}
+      {activeView === 'batch_grn' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Active GRN Filter Notice Banner (Seamless GRN Integration) */}
+          {selectedGrnFilter !== 'all' && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-600 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-bold text-amber-800 dark:text-amber-300">
+                    Filtered by Material Inward Note: <strong className="underline">{selectedGrnFilter}</strong>
+                  </span>
+                  <p className="text-[11px] text-amber-700/80 dark:text-amber-400">
+                    Showing all barcodes generated during this specific GRN shipment. Select items below to batch-print or export to PDF.
+                  </p>
+                </div>
               </div>
-              <p className="text-sm font-bold text-black">{selectedProd.name}</p>
-              <div className="py-2 flex justify-center">
-                <BarcodeView value={selectedProd.barcode || '8901234002039'} width={1.5} height={40} fontSize={11} />
-              </div>
-              <div className="flex justify-between items-center text-[10px] font-mono text-black pt-1 border-t border-gray-300">
-                <span>SKU: {selectedProd.sku}</span>
-                <span>BATCH: {customSerial}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    const idsInThisGrn = filteredBarcodes.map(b => b.id);
+                    setSelectedBarcodeIds(idsInThisGrn);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Select All ({filteredBarcodes.length})
+                </button>
+                <button
+                  onClick={handleClearGrnFilter}
+                  className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-bold text-xs hover:bg-amber-100 transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Clear Filter</span>
+                </button>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
+          )}
 
-      {/* Hidden Bulk Print Section */}
-      <div id="bulk-print-section" className="hidden">
-        <div className="p-4 space-y-6 max-w-[800px] mx-auto">
-          {filteredCatalogProducts.filter(p => selectedBulkIds.includes(p.id)).map(p => (
-            <div key={p.id} className="grid grid-cols-2 gap-4 page-break-after-always">
-              {Array.from({ length: 12 }).map((_, idx) => (
-                <div key={idx} className="bg-white p-3 border border-black rounded flex flex-col justify-between space-y-2">
-                  <div className="flex justify-between items-center text-xs font-mono font-bold text-black">
-                    <span>{settings.orgName || 'ISKCON FOUNDATION'}</span>
-                    <span>₹{Number(p.price).toFixed(2)}</span>
+          {/* Filtering and Bulk Actions Toolbar */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4 font-mono text-xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h2 className="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                  <Boxes className="w-5 h-5 text-rose-500" />
+                  <span>Shipment & Batch Barcode Registry</span>
+                </h2>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Filter by GRN Number, Batch, or SKU to bulk-print or export shipment barcode labels.
+                </p>
+              </div>
+
+              {/* Quantity Multiplication & Layout Settings */}
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={repeatByQuantity}
+                    onChange={e => setRepeatByQuantity(e.target.checked)}
+                    className="accent-rose-500 w-4 h-4 rounded"
+                  />
+                  <span className="font-bold text-[11px] text-slate-700 dark:text-slate-300">
+                    Repeat by Received Qty
+                  </span>
+                </label>
+
+                {/* Template Dimension Selector */}
+                <select
+                  value={stickerType}
+                  onChange={e => setStickerType(e.target.value as any)}
+                  className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none"
+                >
+                  <option value="standard">1" x 2" Standard Retail Tag</option>
+                  <option value="shelf">2" x 4" Shelf Talker Tag</option>
+                  <option value="jewel">0.5" x 1.5" Mini / Jewel Tag</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Filter Controls Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-center">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search SKU, item name, barcode..."
+                  value={searchFilter}
+                  onChange={e => setSearchFilter(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+
+              <div>
+                <select
+                  value={selectedGrnFilter}
+                  onChange={e => setSelectedGrnFilter(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none"
+                >
+                  <option value="all">Filter by GRN ({distinctGrnNumbers.length} Shipments)</option>
+                  {distinctGrnNumbers.map(grn => (
+                    <option key={grn} value={grn}>
+                      {grn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <select
+                  value={selectedBatchFilter}
+                  onChange={e => setSelectedBatchFilter(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none"
+                >
+                  <option value="all">Filter by Batch ({distinctBatchNumbers.length} Batches)</option>
+                  {distinctBatchNumbers.map(bat => (
+                    <option key={bat} value={bat}>
+                      {bat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleBulkPrintFromTable}
+                  disabled={selectedBarcodeIds.length === 0 || isPrinting}
+                  className="flex-1 px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print ({totalSelectedLabelsCount})</span>
+                </button>
+                <button
+                  onClick={handleBulkExportPdf}
+                  disabled={selectedBarcodeIds.length === 0}
+                  className="flex-1 px-3.5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>PDF ({selectedBarcodeIds.length})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Selection Status Bar */}
+            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-slate-700 dark:text-slate-300">
+                  {selectedBarcodeIds.length} of {filteredBarcodes.length} items selected
+                </span>
+                {selectedBarcodeIds.length > 0 && (
+                  <span className="text-rose-600 font-bold">
+                    ({totalSelectedLabelsCount} total label stickers to be printed)
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={toggleSelectAll}
+                  className="hover:text-slate-900 dark:hover:text-white underline cursor-pointer"
+                >
+                  {selectedBarcodeIds.length === filteredBarcodes.length ? 'Deselect All' : 'Select All Filtered'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Barcode Registry Data Table */}
+          <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-xs font-mono text-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-[10px] uppercase text-slate-400 sticky top-0 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedBarcodeIds.length > 0 && selectedBarcodeIds.length === filteredBarcodes.length}
+                        onChange={toggleSelectAll}
+                        className="accent-rose-500 w-4 h-4 rounded cursor-pointer"
+                      />
+                    </th>
+                    <th className="p-3">Barcode (Live Scan)</th>
+                    <th className="p-3">SKU & Item Name</th>
+                    <th className="p-3">GRN Origin</th>
+                    <th className="p-3">Batch Number</th>
+                    <th className="p-3 text-right">Unit Cost</th>
+                    <th className="p-3 text-right">Selling Price</th>
+                    <th className="p-3 text-center">Print Qty</th>
+                    <th className="p-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                  {filteredBarcodes.length > 0 ? (
+                    filteredBarcodes.map(b => {
+                      const isChecked = selectedBarcodeIds.includes(b.id);
+                      const currentQty = getBarcodePrintQty(b);
+                      const cost = b.purchaseCost || 0;
+                      const price = b.sellingPrice || 0;
+                      const marginPct = cost > 0 ? (((price - cost) / cost) * 100).toFixed(0) : '0';
+
+                      return (
+                        <tr
+                          key={b.id}
+                          className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
+                            isChecked ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''
+                          }`}
+                        >
+                          <td className="p-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleBarcodeSelection(b.id)}
+                              className="accent-rose-500 w-4 h-4 rounded cursor-pointer"
+                            />
+                          </td>
+
+                          {/* Visual Barcode & String */}
+                          <td className="p-3">
+                            <div className="flex flex-col items-start gap-1">
+                              <div className="bg-white p-1 rounded border border-slate-200 shadow-2xs">
+                                <BarcodeView
+                                  value={b.barcodeValue}
+                                  width={1.1}
+                                  height={26}
+                                  fontSize={9}
+                                  displayValue={false}
+                                />
+                              </div>
+                              <button
+                                onClick={() => copyBarcodeToClipboard(b.barcodeValue)}
+                                className="flex items-center gap-1 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:text-rose-600 transition-colors cursor-pointer group"
+                                title="Click to copy barcode"
+                              >
+                                <span>{b.barcodeValue}</span>
+                                {copiedBarcode === b.barcodeValue ? (
+                                  <Check className="w-3 h-3 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3 h-3 opacity-40 group-hover:opacity-100" />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* SKU & Product Name */}
+                          <td className="p-3">
+                            <div className="font-bold text-rose-600 dark:text-rose-400">{b.sku}</div>
+                            <div className="text-slate-900 dark:text-white font-sans font-semibold text-xs truncate max-w-[220px]">
+                              {b.productName}
+                            </div>
+                            {b.branchName && (
+                              <span className="text-[10px] text-slate-400 block mt-0.5 truncate max-w-[180px]">
+                                {b.branchName}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* GRN Origin Badge */}
+                          <td className="p-3">
+                            {b.grnNumber ? (
+                              <button
+                                onClick={() => setSelectedGrnFilter(b.grnNumber!)}
+                                className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold text-[11px] border border-amber-500/20 hover:bg-amber-500/20 transition-colors cursor-pointer"
+                                title="Filter by this GRN"
+                              >
+                                {b.grnNumber}
+                              </button>
+                            ) : (
+                              <span className="text-slate-400 text-[10px]">Master Default</span>
+                            )}
+                          </td>
+
+                          {/* Batch Number */}
+                          <td className="p-3">
+                            <button
+                              onClick={() => setSelectedBatchFilter(b.batchNo)}
+                              className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400 font-bold text-[11px] border border-blue-500/20 hover:bg-blue-500/20 transition-colors cursor-pointer"
+                              title="Filter by this batch"
+                            >
+                              {b.batchNo}
+                            </button>
+                          </td>
+
+                          {/* Unit Purchase Cost */}
+                          <td className="p-3 text-right">
+                            <span className="text-slate-600 dark:text-slate-300">
+                              ₹{Number(cost).toFixed(2)}
+                            </span>
+                          </td>
+
+                          {/* Selling Price & Margin */}
+                          <td className="p-3 text-right">
+                            <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                              ₹{Number(price).toFixed(2)}
+                            </div>
+                            {cost > 0 && (
+                              <span className="text-[9px] text-slate-400 block">
+                                +{marginPct}% margin
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Quantity & Multiplier */}
+                          <td className="p-3 text-center">
+                            <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg px-2 py-1 gap-1 border border-slate-200 dark:border-slate-700">
+                              <input
+                                type="number"
+                                min="1"
+                                max="1000"
+                                value={currentQty}
+                                onChange={e => setBarcodePrintQty(b.id, parseInt(e.target.value) || 1)}
+                                className="w-12 bg-transparent text-xs font-bold text-center text-slate-900 dark:text-white focus:outline-none"
+                              />
+                              <span className="text-[10px] text-slate-400">pcs</span>
+                            </div>
+                            {b.printCount && b.printCount !== currentQty && (
+                              <button
+                                onClick={() => setBarcodePrintQty(b.id, b.printCount)}
+                                className="text-[9px] text-rose-500 hover:underline block mt-0.5"
+                                title="Reset to inward quantity received"
+                              >
+                                reset ({b.printCount})
+                              </button>
+                            )}
+                          </td>
+
+                          {/* Quick Actions */}
+                          <td className="p-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleSingleItemPrint(b)}
+                                className="p-1.5 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-600 dark:text-rose-400 rounded-lg transition-colors cursor-pointer"
+                                title={`Print ${currentQty} stickers for ${b.sku}`}
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleSingleItemPdf(b)}
+                                className="p-1.5 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-600 dark:text-amber-400 rounded-lg transition-colors cursor-pointer"
+                                title={`Download PDF for ${b.sku}`}
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const prod = products.find(p => p.sku === b.sku);
+                                  if (prod) setSelectedProduct(prod);
+                                  setCustomSerial(b.batchNo);
+                                  setPrintCount(currentQty);
+                                  setActiveView('single_sku');
+                                }}
+                                className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300 rounded-lg transition-colors cursor-pointer"
+                                title="Open in Single SKU Generator"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={9} className="p-8 text-center text-slate-400 text-xs">
+                        No batch barcodes found matching the selected filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW 2: SINGLE SKU GENERATOR (`single_sku`) */}
+      {activeView === 'single_sku' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-in fade-in duration-200 font-mono">
+          {/* Left Controls (7 Cols) */}
+          <div className="lg:col-span-7 space-y-6">
+            <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <h2 className="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-rose-500" />
+                  <span>On-Demand Single SKU Generator</span>
+                </h2>
+                <span className="text-[11px] text-slate-400">Custom count & label format</span>
+              </div>
+
+              {/* Product SKU Selector */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-400 uppercase">1. Product Catalog Target</label>
+                <ProductSearchCombobox
+                  selectedProductId={selectedProd.id}
+                  onSelect={p => setSelectedProduct(p)}
+                  branchId={currentBranch?.id}
+                />
+              </div>
+
+              {/* Barcode & Batch Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase">Assigned Barcode Value</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={selectedProd?.barcode || '8901234002039'}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 border border-transparent"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase">Batch Number / Serial</label>
+                  <input
+                    type="text"
+                    value={customSerial}
+                    onChange={e => setCustomSerial(e.target.value)}
+                    placeholder="e.g. BAT-2026-001"
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+              </div>
+
+              {/* Label Layout Formats */}
+              <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <h3 className="font-bold text-xs text-slate-400 uppercase">2. Sticker Dimensions & Format</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {[
+                    { id: 'standard', name: '1" x 2" Standard Tag', desc: 'Books, Apparel & Retail items' },
+                    { id: 'shelf', name: '2" x 4" Shelf Label', desc: 'Aisle headers & Shelf display' },
+                    { id: 'jewel', name: '0.5" x 1.5" Mini Tag', desc: 'Japa Mala, Beads & Small Deities' }
+                  ].map(type => (
+                    <button
+                      key={type.id}
+                      onClick={() => setStickerType(type.id as any)}
+                      className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                        stickerType === type.id
+                          ? 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 font-bold shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="text-xs font-bold">{type.name}</span>
+                      <span className="text-[10px] text-slate-400 mt-1">{type.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quantity to Print */}
+              <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex justify-between items-center">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase">3. Quantity to Print</label>
+                  <span className="font-bold text-rose-500 text-sm">{printCount} stickers</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="200"
+                  step="1"
+                  value={printCount}
+                  onChange={e => setPrintCount(Number(e.target.value))}
+                  className="w-full accent-rose-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <button onClick={() => setPrintCount(4)} className="hover:text-rose-500 cursor-pointer">4 (1 row)</button>
+                  <button onClick={() => setPrintCount(12)} className="hover:text-rose-500 cursor-pointer">12</button>
+                  <button onClick={() => setPrintCount(24)} className="hover:text-rose-500 cursor-pointer">24 (1 sheet)</button>
+                  <button onClick={() => setPrintCount(50)} className="hover:text-rose-500 cursor-pointer">50</button>
+                  <button onClick={() => setPrintCount(100)} className="hover:text-rose-500 cursor-pointer">100 (bulk)</button>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={handleSingleSkuPrint}
+                  disabled={isPrinting}
+                  className="flex-1 px-5 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Print {printCount} Labels to Thermal</span>
+                </button>
+                <button
+                  onClick={handleSingleSkuPdf}
+                  className="px-5 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download PDF Sheet</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Live Sticker Preview (5 Cols) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="font-bold text-xs text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Sticker Live Preview</span>
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 uppercase">
+                  {stickerType} layout
+                </span>
+              </div>
+
+              {/* Live Preview Card */}
+              <div className="bg-slate-100 dark:bg-slate-950 p-6 rounded-xl flex items-center justify-center border border-dashed border-slate-300 dark:border-slate-800">
+                <div
+                  className={`bg-white text-black p-4 rounded-lg border-2 border-black shadow-lg transition-all ${
+                    stickerType === 'shelf'
+                      ? 'w-[280px] min-h-[220px]'
+                      : stickerType === 'jewel'
+                      ? 'w-[200px] min-h-[110px] text-[10px]'
+                      : 'w-[240px] min-h-[140px]'
+                  } flex flex-col justify-between`}
+                >
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-1 text-[11px] font-bold">
+                    <span>{settings?.orgName || 'ISKCON FOUNDATION'}</span>
+                    <span className="text-emerald-700 font-extrabold">₹{Number(selectedProd.price).toFixed(2)}</span>
                   </div>
-                  <p className="text-xs font-bold text-black">{p.name}</p>
-                  <div className="py-1 flex justify-center">
-                    <BarcodeView value={p.barcode || '8901234002039'} width={1.4} height={36} fontSize={10} />
+
+                  <div className="py-1">
+                    <p className={`font-sans font-bold text-black ${stickerType === 'jewel' ? 'text-[10px]' : 'text-xs'} line-clamp-2`}>
+                      {selectedProd.name}
+                    </p>
                   </div>
-                  <div className="flex justify-between items-center text-[9px] font-mono text-black pt-1 border-t border-gray-300">
-                    <span>SKU: {p.sku}</span>
-                    <span>BATCH: {p.batchNo || 'ISK-2026'}</span>
+
+                  <div className="py-2 flex justify-center">
+                    <BarcodeView
+                      value={selectedProd.barcode || '8901234002039'}
+                      width={stickerType === 'jewel' ? 1.0 : stickerType === 'shelf' ? 1.6 : 1.3}
+                      height={stickerType === 'jewel' ? 24 : stickerType === 'shelf' ? 42 : 34}
+                      fontSize={stickerType === 'jewel' ? 8 : 10}
+                    />
+                  </div>
+
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-200 text-[9px] text-slate-600">
+                    <span>SKU: {selectedProd.sku}</span>
+                    <span>BAT: {customSerial}</span>
                   </div>
                 </div>
-              ))}
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 text-[11px] text-slate-500 space-y-1">
+                <div className="flex justify-between">
+                  <span>Target Printer:</span>
+                  <strong className="text-slate-800 dark:text-slate-200">Thermal Roll / 2x4 A4 Sheets</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Product Category:</span>
+                  <strong className="text-slate-800 dark:text-slate-200">{selectedProd.category}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Current Stock:</span>
+                  <strong className="text-slate-800 dark:text-slate-200">{selectedProd.stock} units</strong>
+                </div>
+              </div>
             </div>
-          ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

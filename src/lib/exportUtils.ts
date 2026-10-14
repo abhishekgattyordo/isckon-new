@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import JsBarcode from 'jsbarcode';
 
 export interface EventExportData {
   event: {
@@ -620,3 +621,307 @@ export function exportBIAnalyticsToCsv(data: BIAnalyticsExportData) {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+export interface BarcodeExportItem {
+  sku: string;
+  productName: string;
+  barcodeValue: string;
+  batchNo?: string;
+  grnNumber?: string;
+  sellingPrice?: number;
+  purchaseCost?: number;
+  quantity?: number;
+  branchName?: string;
+  template?: 'retail_tag_1x2' | 'shelf_label_2x3' | 'jewelry_hangtag' | 'box_shipping_4x6' | string;
+}
+
+export interface BarcodePdfOptions {
+  title?: string;
+  orgName?: string;
+  repeatByQuantity?: boolean;
+  layout?: 'standard' | 'shelf' | 'jewel';
+  filename?: string;
+}
+
+/**
+ * Renders a barcode value onto an in-memory canvas and returns a high-resolution PNG data URL
+ */
+function getBarcodePngDataUrl(value: string, format = 'auto'): string {
+  if (typeof document === 'undefined') return '';
+  const canvas = document.createElement('canvas');
+  const barcodeVal = String(value || '8901234002039').trim();
+
+  let detectedFormat = format;
+  if (format === 'auto') {
+    if (/^\d{13}$/.test(barcodeVal)) {
+      detectedFormat = 'EAN13';
+    } else if (/^\d{8}$/.test(barcodeVal)) {
+      detectedFormat = 'EAN8';
+    } else if (/^\d{12}$/.test(barcodeVal)) {
+      detectedFormat = 'UPC';
+    } else {
+      detectedFormat = 'CODE128';
+    }
+  }
+
+  try {
+    JsBarcode(canvas, barcodeVal, {
+      format: detectedFormat as any,
+      width: 2,
+      height: 48,
+      displayValue: true,
+      fontSize: 12,
+      font: 'monospace',
+      margin: 4,
+      background: '#ffffff',
+      lineColor: '#000000',
+    });
+    return canvas.toDataURL('image/png');
+  } catch {
+    try {
+      JsBarcode(canvas, barcodeVal, {
+        format: 'CODE128',
+        width: 2,
+        height: 48,
+        displayValue: true,
+        fontSize: 12,
+        font: 'monospace',
+        margin: 4,
+        background: '#ffffff',
+        lineColor: '#000000',
+      });
+      return canvas.toDataURL('image/png');
+    } catch {
+      return '';
+    }
+  }
+}
+
+/**
+ * Export high-resolution printable barcode label sheets to PDF
+ */
+export function exportBarcodesToPdf(
+  items: BarcodeExportItem[],
+  options?: BarcodePdfOptions
+) {
+  if (!items || items.length === 0) return;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const orgName = options?.orgName || 'ISKCON FOUNDATION';
+  const layout = options?.layout || 'standard';
+  const repeatByQuantity = options?.repeatByQuantity ?? false;
+
+  // Flatten items if repeating by quantity
+  const flattened: BarcodeExportItem[] = [];
+  items.forEach(item => {
+    const count = repeatByQuantity && item.quantity && item.quantity > 0 ? Number(item.quantity) : 1;
+    for (let i = 0; i < count; i++) {
+      flattened.push(item);
+    }
+  });
+
+  if (layout === 'shelf') {
+    // 2 columns x 3 rows = 6 shelf tags per page
+    const colWidth = 92;
+    const rowHeight = 84;
+    const marginX = 13;
+    const marginY = 18;
+    const spacingX = 8;
+    const spacingY = 8;
+    const itemsPerPage = 6;
+
+    flattened.forEach((item, index) => {
+      const pageIndex = index % itemsPerPage;
+      if (index > 0 && pageIndex === 0) {
+        doc.addPage();
+      }
+
+      const col = pageIndex % 2;
+      const row = Math.floor(pageIndex / 2);
+      const x = marginX + col * (colWidth + spacingX);
+      const y = marginY + row * (rowHeight + spacingY);
+
+      // Card outer border
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, y, colWidth, rowHeight, 3, 3, 'S');
+
+      // Top Header
+      doc.setFillColor(15, 23, 42);
+      doc.roundedRect(x, y, colWidth, 9, 3, 3, 'F');
+      doc.rect(x, y + 5, colWidth, 4, 'F'); // square bottom edges
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(orgName, x + 4, y + 6);
+      if (item.grnNumber) {
+        doc.setFontSize(6.5);
+        doc.setTextColor(245, 158, 11);
+        doc.text(item.grnNumber, x + colWidth - 4, y + 6, { align: 'right' });
+      }
+
+      // Product Title
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      const titleLines = doc.splitTextToSize(item.productName, colWidth - 8);
+      doc.text(titleLines.slice(0, 2), x + 4, y + 15);
+
+      // Prominent Retail Price
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(16, 185, 129);
+      const priceText = item.sellingPrice ? `₹${Number(item.sellingPrice).toFixed(2)}` : 'MRP INCL. TAX';
+      doc.text(priceText, x + 4, y + 27);
+
+      // Barcode Image
+      const barcodeDataUrl = getBarcodePngDataUrl(item.barcodeValue);
+      if (barcodeDataUrl) {
+        doc.addImage(barcodeDataUrl, 'PNG', x + (colWidth - 72) / 2, y + 31, 72, 28);
+      }
+
+      // Metadata Footer
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.line(x + 4, y + rowHeight - 16, x + colWidth - 4, y + rowHeight - 16);
+      doc.text(`SKU: ${item.sku}`, x + 4, y + rowHeight - 10);
+      doc.text(`BATCH: ${item.batchNo || 'N/A'}`, x + 4, y + rowHeight - 5);
+      if (item.purchaseCost) {
+        doc.text(`COST: ₹${Number(item.purchaseCost).toFixed(2)}`, x + colWidth - 4, y + rowHeight - 10, { align: 'right' });
+      }
+      doc.text(item.barcodeValue, x + colWidth - 4, y + rowHeight - 5, { align: 'right' });
+    });
+  } else if (layout === 'jewel') {
+    // 3 columns x 8 rows = 24 jewel/mini hangtags per page
+    const colWidth = 58;
+    const rowHeight = 31;
+    const marginX = 12;
+    const marginY = 14;
+    const spacingX = 6;
+    const spacingY = 5;
+    const itemsPerPage = 24;
+
+    flattened.forEach((item, index) => {
+      const pageIndex = index % itemsPerPage;
+      if (index > 0 && pageIndex === 0) {
+        doc.addPage();
+      }
+
+      const col = pageIndex % 3;
+      const row = Math.floor(pageIndex / 3);
+      const x = marginX + col * (colWidth + spacingX);
+      const y = marginY + row * (rowHeight + spacingY);
+
+      doc.setDrawColor(210, 210, 210);
+      doc.setLineWidth(0.25);
+      doc.roundedRect(x, y, colWidth, rowHeight, 2, 2, 'S');
+
+      // Top Mini Header
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(orgName.slice(0, 18), x + 3, y + 4.5);
+      doc.setTextColor(16, 185, 129);
+      doc.text(item.sellingPrice ? `₹${Number(item.sellingPrice).toFixed(0)}` : '', x + colWidth - 3, y + 4.5, { align: 'right' });
+
+      // Title
+      doc.setFontSize(7);
+      doc.setTextColor(30, 41, 59);
+      const titleLines = doc.splitTextToSize(item.productName, colWidth - 6);
+      doc.text(titleLines[0] || item.productName, x + 3, y + 8.5);
+
+      // Barcode
+      const barcodeDataUrl = getBarcodePngDataUrl(item.barcodeValue);
+      if (barcodeDataUrl) {
+        doc.addImage(barcodeDataUrl, 'PNG', x + (colWidth - 50) / 2, y + 10, 50, 14);
+      }
+
+      // Footer
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`SKU: ${item.sku.slice(0, 14)}`, x + 3, y + rowHeight - 2.5);
+      doc.text(`BAT: ${item.batchNo ? item.batchNo.slice(-10) : 'N/A'}`, x + colWidth - 3, y + rowHeight - 2.5, { align: 'right' });
+    });
+  } else {
+    // Standard 1" x 2" label: 2 columns x 5 rows = 10 labels per page
+    const colWidth = 92;
+    const rowHeight = 51;
+    const marginX = 13;
+    const marginY = 16;
+    const spacingX = 8;
+    const spacingY = 6;
+    const itemsPerPage = 10;
+
+    flattened.forEach((item, index) => {
+      const pageIndex = index % itemsPerPage;
+      if (index > 0 && pageIndex === 0) {
+        doc.addPage();
+      }
+
+      const col = pageIndex % 2;
+      const row = Math.floor(pageIndex / 2);
+      const x = marginX + col * (colWidth + spacingX);
+      const y = marginY + row * (rowHeight + spacingY);
+
+      // Label border
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(x, y, colWidth, rowHeight, 2.5, 2.5, 'S');
+
+      // Top Header
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(71, 85, 105);
+      doc.text(orgName, x + 4, y + 6);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(16, 185, 129);
+      const priceText = item.sellingPrice ? `₹${Number(item.sellingPrice).toFixed(2)}` : 'MRP';
+      doc.text(priceText, x + colWidth - 4, y + 6, { align: 'right' });
+
+      // Divider
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.2);
+      doc.line(x + 4, y + 8, x + colWidth - 4, y + 8);
+
+      // Product Title
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      const titleLines = doc.splitTextToSize(item.productName, colWidth - 8);
+      doc.text(titleLines.slice(0, 2), x + 4, y + 13);
+
+      // Barcode
+      const barcodeDataUrl = getBarcodePngDataUrl(item.barcodeValue);
+      if (barcodeDataUrl) {
+        doc.addImage(barcodeDataUrl, 'PNG', x + (colWidth - 70) / 2, y + 17, 70, 22);
+      }
+
+      // Bottom Metadata Row
+      doc.setDrawColor(226, 232, 240);
+      doc.line(x + 4, y + rowHeight - 8, x + colWidth - 4, y + rowHeight - 8);
+
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(`SKU: ${item.sku}`, x + 4, y + rowHeight - 3);
+
+      const batchAndGrn = [
+        item.batchNo ? `BAT: ${item.batchNo}` : null,
+        item.grnNumber ? `GRN: ${item.grnNumber}` : null
+      ].filter(Boolean).join(' • ');
+
+      doc.text(batchAndGrn || item.barcodeValue, x + colWidth - 4, y + rowHeight - 3, { align: 'right' });
+    });
+  }
+
+  const cleanFilename = (options?.filename || `Barcode_Labels_${new Date().toISOString().slice(0, 10)}.pdf`).replace(/[^a-zA-Z0-9_.-]/g, '_');
+  doc.save(cleanFilename);
+}
+

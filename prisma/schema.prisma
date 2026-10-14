@@ -217,6 +217,9 @@ model BarcodeRecord {
   generatedAt  String? @map("generated_at")
   template     String?
   printCount   Int?    @default(1) @map("print_count")
+  batchId      String? @map("batch_id")
+  purchaseCost Float?  @map("purchase_cost")
+  sellingPrice Float?  @map("selling_price")
 
   @@map("barcode_records")
 }

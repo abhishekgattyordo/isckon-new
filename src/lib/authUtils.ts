@@ -15,6 +15,7 @@ export const ALL_SYSTEM_MODULES: { id: ModuleType | 'audit'; label: string; desc
   { id: 'dashboard', label: 'Executive Dashboard', description: 'Real-time sales, insights, performance graphs and critical low-stock alerts.', category: 'Overview' },
   { id: 'pos', label: 'POS Checkout Stalls', description: 'Register sales transactions, scan barcodes, select sales tags, apply discounts, and print customer receipts.', category: 'Core Operations' },
   { id: 'inward', label: 'Material Inward GRN', description: 'Log incoming material shipments, verify supplier parameters, and record custom batch parameters.', category: 'Core Operations' },
+  { id: 'suppliers', label: 'Suppliers & Vendors', description: 'Manage vendor directory, payment terms, GSTIN tax credentials, and inward purchase histories.', category: 'Core Operations' },
   { id: 'products', label: 'Product Catalog & Master Items', description: 'Browse and manage products, book catalog, categories, pricing, and master item specs.', category: 'Inventory & Catalog' },
   { id: 'inventory', label: 'Stock & Inventory', description: 'Monitor warehouse zones, track granular batch ages, execute stock transfers, and log shrinkage adjustments.', category: 'Inventory & Catalog' },
   { id: 'barcode', label: 'Barcode & Labels', description: 'Design custom print labels, generate standard EAN barcodes, and trigger queue prints.', category: 'Inventory & Catalog' },
@@ -48,15 +49,15 @@ export function getDefaultPermissionsForRole(role: UserProfile['role']): (Module
     case 'Super Admin':
     case 'Administrator':
     case 'System Admin':
-      return ['dashboard', 'products', 'pos', 'inward', 'inventory', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
+      return ['dashboard', 'products', 'pos', 'inward', 'suppliers', 'inventory', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
     case 'Branch Admin':
     case 'Store Manager':
-      return ['dashboard', 'products', 'pos', 'inward', 'inventory', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
+      return ['dashboard', 'products', 'pos', 'inward', 'suppliers', 'inventory', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
     case 'Warehouse Manager':
-      return ['dashboard', 'products', 'inward', 'inventory', 'barcode', 'reports'];
+      return ['dashboard', 'products', 'inward', 'suppliers', 'inventory', 'barcode', 'reports'];
     case 'Store Executive':
-      // Restricted operational access: POS Checkout Stalls, Product Catalog, Sales Events & Stalls
-      return ['dashboard', 'pos', 'products', 'events'];
+      // Restricted operational access: POS Checkout Stalls, Product Catalog, Sales Events & Stalls, Suppliers & Vendors
+      return ['dashboard', 'pos', 'products', 'events', 'suppliers'];
     case 'Lead Cashier':
     case 'Cashier':
       return ['dashboard', 'pos', 'products'];
@@ -90,7 +91,7 @@ export function canAccessModule(user: UserProfile | null | undefined, module: Mo
         user.permissions.includes('reports')
       );
     }
-    return user.permissions.includes(module as ModuleType);
+    if (user.permissions.includes(module as ModuleType)) return true;
   }
 
   // Fallback to role defaults
@@ -98,7 +99,7 @@ export function canAccessModule(user: UserProfile | null | undefined, module: Mo
   if (module === ('users' as any)) {
     return isSuperAdmin(user) || defaults.includes('settings');
   }
-  return defaults.includes(module);
+  return defaults.includes(module as ModuleType | 'audit');
 }
 
 export function getModuleLabel(mod: ModuleType | 'audit'): string {
@@ -108,6 +109,7 @@ export function getModuleLabel(mod: ModuleType | 'audit'): string {
     case 'dashboard': return 'Executive Dashboard';
     case 'pos': return 'POS Checkout Stalls';
     case 'inward': return 'Material Inward (GRN)';
+    case 'suppliers': return 'Suppliers & Vendors';
     case 'products': return 'Product Catalog';
     case 'inventory': return 'Stock & Inventory';
     case 'barcode': return 'Barcodes & Labels';

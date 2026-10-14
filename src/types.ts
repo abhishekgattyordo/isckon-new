@@ -2,6 +2,7 @@ export type ModuleType =
   | 'dashboard'
   | 'products'
   | 'inward'
+  | 'suppliers'
   | 'inventory'
   | 'barcode'
   | 'pos'
@@ -11,6 +12,34 @@ export type ModuleType =
   | 'users'
   | 'audit'
   | 'recycle_bin';
+
+export type SupplierPaymentTerms = 'Net 15' | 'Net 30' | 'Net 45' | 'Net 60' | 'Advance' | 'COD';
+
+export interface Supplier {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  gstin?: string;
+  pan?: string;
+  paymentTerms: SupplierPaymentTerms;
+  rating: number; // 1 to 5
+  status: 'active' | 'inactive';
+  bankName?: string;
+  bankAccountNo?: string;
+  bankIfsc?: string;
+  notes?: string;
+  createdAt?: string;
+  branchId?: string;
+  branchName?: string;
+}
 
 export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock' | 'discontinued';
 
@@ -139,6 +168,10 @@ export interface BarcodeRecord {
   template: BarcodeLabelTemplate;
   generatedAt: string;
   batchNo: string;
+  batchId?: string;
+  grnNumber?: string;
+  purchaseCost?: number;
+  sellingPrice?: number;
   printCount: number;
   branchId?: string;
   branchName?: string;
@@ -149,6 +182,10 @@ export interface CartItem {
   quantity: number;
   discountPercent: number;
   customNote?: string;
+  batchId?: string;
+  batchNumber?: string;
+  costPrice?: number;
+  sellingPrice?: number;
 }
 
 export interface SalesTag {

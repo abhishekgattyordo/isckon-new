@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate || exit 0"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -31,12 +31,9 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@types/jsbarcode": "^3.11.4",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "autoprefixer": "^10.4.20",
-    "tailwindcss": "^4.0.0",
-    "typescript": "~5.7.2"
+    "typescript": "^5.0.0"
   }
 }

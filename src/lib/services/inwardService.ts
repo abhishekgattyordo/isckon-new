@@ -71,6 +71,24 @@ export async function getDeletedInwardNotes(): Promise<MaterialInwardNote[]> {
 }
 
 export async function createInwardNote(noteData: Omit<MaterialInwardNote, 'id'>): Promise<MaterialInwardNote> {
+  if (!noteData.vendorName || !noteData.vendorName.trim()) {
+    throw new Error('Validation Error: Vendor Name is mandatory for GRN submission.');
+  }
+  if (!noteData.poNumber || !noteData.poNumber.trim()) {
+    throw new Error('Validation Error: PO Number is mandatory for GRN submission.');
+  }
+  if (!noteData.items || !Array.isArray(noteData.items) || noteData.items.length === 0) {
+    throw new Error('Validation Error: GRN must contain at least one item row.');
+  }
+  for (const item of noteData.items) {
+    if (!item.sku || !item.sku.trim()) {
+      throw new Error('Validation Error: Product SKU/Name is mandatory for every item row.');
+    }
+    if (!item.quantity || Number(item.quantity) <= 0) {
+      throw new Error(`Validation Error: Quantity must be greater than 0 for item SKU "${item.sku}".`);
+    }
+  }
+
   const newNote: MaterialInwardNote = {
     ...noteData,
     id: `min-${Date.now()}`,

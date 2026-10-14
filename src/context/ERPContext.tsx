@@ -19,7 +19,8 @@ import {
   SystemSettings,
   AuditLog,
   RecycleBinItem,
-  RecycleItemType
+  RecycleItemType,
+  Supplier
 } from '../types';
 import {
   INITIAL_BRANCHES,
@@ -35,7 +36,8 @@ import {
   INITIAL_BARCODES,
   INITIAL_BATCHES,
   INITIAL_AUDIT_LOGS,
-  INITIAL_SALES_TAGS
+  INITIAL_SALES_TAGS,
+  INITIAL_SUPPLIERS
 } from '../data/initialData';
 import { GLOBAL_ALL_BRANCHES, isSuperAdmin, isBranchAdmin, getDefaultPermissionsForRole } from '../lib/authUtils';
 import { isProductInZone } from '../lib/warehouseUtils';
@@ -56,6 +58,11 @@ interface ERPContextType {
   deleteProduct: (id: string) => void;
   inwardNotes: MaterialInwardNote[];
   addInwardNote: (note: Omit<MaterialInwardNote, 'id'>) => void;
+  suppliers: Supplier[];
+  setSuppliers: React.Dispatch<React.SetStateAction<Supplier[]>>;
+  addSupplier: (supplier: Omit<Supplier, 'id' | 'createdAt' | 'code'> & { id?: string; code?: string }) => Supplier;
+  updateSupplier: (id: string, updates: Partial<Supplier>) => void;
+  deleteSupplier: (id: string) => void;
   batches: InventoryBatch[];
   setBatches: React.Dispatch<React.SetStateAction<InventoryBatch[]>>;
   zones: WarehouseZone[];
@@ -87,7 +94,7 @@ interface ERPContextType {
   updateUser: (id: string, updates: Partial<UserProfile>) => void;
   deleteUser: (id: string) => void;
   cart: CartItem[];
-  addToCart: (product: Product, quantity?: number) => void;
+  addToCart: (product: Product, quantity?: number, batchId?: string) => void;
   removeFromCart: (productId: string) => void;
   updateCartQuantity: (productId: string, quantity: number) => void;
   updateCartDiscount: (productId: string, discount: number) => void;
@@ -285,7 +292,43 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [allProducts, setAllProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [allInwardNotes, setAllInwardNotes] = useState<MaterialInwardNote[]>(INITIAL_INWARD_NOTES);
-  const [batches, setBatches] = useState<InventoryBatch[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('iskcon_erp_suppliers');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch (e) {}
+      }
+    }
+    return INITIAL_SUPPLIERS;
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('iskcon_erp_suppliers', JSON.stringify(suppliers));
+    }
+  }, [suppliers]);
+  const [batches, setBatches] = useState<InventoryBatch[]>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('iskcon_erp_batches');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch (e) {}
+      }
+    }
+    return INITIAL_BATCHES;
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('iskcon_erp_batches', JSON.stringify(batches));
+    }
+  }, [batches]);
+
   const [allZones, setAllZones] = useState<WarehouseZone[]>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('iskcon_erp_zones');
@@ -856,7 +899,24 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
-  const [barcodes, setBarcodes] = useState<BarcodeRecord[]>(INITIAL_BARCODES);
+  const [barcodes, setBarcodes] = useState<BarcodeRecord[]>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('iskcon_erp_barcodes');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch (e) {}
+      }
+    }
+    return INITIAL_BARCODES;
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('iskcon_erp_barcodes', JSON.stringify(barcodes));
+    }
+  }, [barcodes]);
   const [salesTags, setSalesTags] = useState<SalesTag[]>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('iskcon_erp_sales_tags');
@@ -881,10 +941,12 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const parsed = JSON.parse(stored);
           if (parsed && parsed.name) {
             const perms = Array.isArray(parsed.permissions) ? [...parsed.permissions] : [];
-            if (!perms.includes('products')) {
-              perms.push('products');
-            }
-            return { ...parsed, permissions: perms };
+            if (!perms.includes('products')) perms.push('products');
+            if (!perms.includes('suppliers')) perms.push('suppliers');
+            
+            const updatedUser = { ...parsed, permissions: perms };
+            localStorage.setItem('iskcon_erp_user', JSON.stringify(updatedUser));
+            return updatedUser;
           }
         } catch (e) {}
       }
@@ -1149,6 +1211,38 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       setBatches(prev => [newBatch, ...prev]);
 
+      // Generate a unique batch-bound barcode value (EAN-13 compliant 13-digit identifier)
+      // Hash includes SKU, batch number, GRN number, and cost to ensure unique barcode per inward event
+      const seedString = `${item.sku}-${newBatch.batchNo}-${newNote.grnNumber}-${Math.floor(item.unitCost)}`;
+      const seedNum = Math.abs(seedString.split('').reduce((acc, c) => ((acc << 5) - acc) + c.charCodeAt(0), 0));
+      const raw9 = String(seedNum).padStart(9, '0').slice(-9);
+      const raw12 = `890${raw9}`;
+      let eanSum = 0;
+      for (let i = 0; i < 12; i++) {
+        eanSum += parseInt(raw12[i], 10) * (i % 2 === 0 ? 1 : 3);
+      }
+      const checkDigit = (10 - (eanSum % 10)) % 10;
+      const uniqueBarcodeVal = `${raw12}${checkDigit}`;
+
+      const newBarcodeRec: BarcodeRecord = {
+        id: `bar-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        sku: item.sku,
+        productName: item.name,
+        barcodeValue: uniqueBarcodeVal,
+        format: 'code128',
+        template: 'retail_tag_1x2',
+        generatedAt: new Date().toISOString(),
+        batchNo: newBatch.batchNo,
+        batchId: newBatch.id,
+        grnNumber: newNote.grnNumber,
+        purchaseCost: item.unitCost,
+        sellingPrice: newBatch.sellingPrice,
+        printCount: item.quantity,
+        branchId: newNote.branchId,
+        branchName: newNote.branchName
+      };
+      setBarcodes(prev => [newBarcodeRec, ...prev]);
+
       // Add audit movement
       const mov: StockMovement = {
         id: `mov-${Date.now()}-${Math.random()}`,
@@ -1182,6 +1276,56 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     quickNotification('GRN Created Successfully', `Document ${newNote.grnNumber} processed for branch ${newNote.branchName}.`, 'success');
+  };
+
+  const addSupplier = (supplierData: Omit<Supplier, 'id' | 'createdAt' | 'code'> & { id?: string; code?: string }): Supplier => {
+    const newSupplier: Supplier = {
+      ...supplierData,
+      id: supplierData.id || `sup-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      code: supplierData.code || `SUP-${1000 + suppliers.length + 1}`,
+      createdAt: new Date().toISOString(),
+      branchId: supplierData.branchId || currentBranch?.id || 'branch-bangalore',
+      branchName: supplierData.branchName || currentBranch?.name || 'Bangalore ISKCON Sri Radha Krishna Temple',
+      rating: supplierData.rating || 5,
+      status: supplierData.status || 'active',
+      paymentTerms: supplierData.paymentTerms || 'Net 30'
+    };
+
+    setSuppliers(prev => [newSupplier, ...prev]);
+    logActivity(
+      'Registered New Supplier',
+      'suppliers',
+      newSupplier.code,
+      `Registered vendor "${newSupplier.name}" (${newSupplier.category}) with ${newSupplier.paymentTerms} terms.`
+    );
+    quickNotification(
+      'Supplier Registered',
+      `"${newSupplier.name}" (${newSupplier.code}) registered successfully.`,
+      'success'
+    );
+    return newSupplier;
+  };
+
+  const updateSupplier = (id: string, updates: Partial<Supplier>) => {
+    setSuppliers(prev =>
+      prev.map(s => {
+        if (s.id === id) {
+          return { ...s, ...updates };
+        }
+        return s;
+      })
+    );
+    logActivity('Updated Supplier Details', 'suppliers', id, `Updated information for supplier ID ${id}.`);
+    quickNotification('Supplier Updated', 'Vendor records updated successfully.', 'success');
+  };
+
+  const deleteSupplier = (id: string) => {
+    const target = suppliers.find(s => s.id === id);
+    if (target) {
+      setSuppliers(prev => prev.filter(s => s.id !== id));
+      logActivity('Deleted Supplier', 'suppliers', target.code, `Removed vendor "${target.name}".`);
+      quickNotification('Supplier Removed', `Vendor "${target.name}" removed from registry.`, 'info');
+    }
   };
 
   const addOrder = (orderData: Omit<POSOrder, 'id'>) => {
@@ -1348,15 +1492,49 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const addToCart = (product: Product, quantity = 1) => {
+  const addToCart = (product: Product, quantity = 1, batchId?: string) => {
+    let selectedBatch: InventoryBatch | undefined;
+    if (batchId) {
+      selectedBatch = batches.find(b => b.id === batchId);
+    } else {
+      const activeBatches = batches
+        .filter(b => b.sku === product.sku && b.remainingQuantity > 0)
+        .sort((a, b) => a.receivedDate.localeCompare(b.receivedDate));
+      if (activeBatches.length > 0) {
+        selectedBatch = activeBatches[0]; // Oldest active batch (FIFO priority)
+      }
+    }
+
+    const priceToUse = selectedBatch ? selectedBatch.sellingPrice : product.price;
+    const costToUse = selectedBatch ? selectedBatch.costPrice : product.cost;
+    const batchNoToUse = selectedBatch ? selectedBatch.batchNo : product.batchNo;
+    const resolvedBatchId = selectedBatch ? selectedBatch.id : undefined;
+
+    const batchScopedProduct: Product = {
+      ...product,
+      price: priceToUse,
+      cost: costToUse,
+      batchNo: batchNoToUse || product.batchNo
+    };
+
     setCart(prev => {
-      const existing = prev.find(item => item.product.id === product.id);
+      const existing = prev.find(item => item.product.id === product.id && item.batchId === resolvedBatchId);
       if (existing) {
         return prev.map(item =>
-          item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item
+          item.product.id === product.id && item.batchId === resolvedBatchId
+            ? { ...item, quantity: item.quantity + quantity }
+            : item
         );
       }
-      return [...prev, { product, quantity, discountPercent: 0 }];
+      return [...prev, {
+        product: batchScopedProduct,
+        quantity,
+        discountPercent: 0,
+        batchId: resolvedBatchId,
+        batchNumber: batchNoToUse,
+        costPrice: costToUse,
+        sellingPrice: priceToUse
+      }];
     });
   };
 
@@ -2047,6 +2225,11 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteProduct,
         inwardNotes,
         addInwardNote,
+        suppliers,
+        setSuppliers,
+        addSupplier,
+        updateSupplier,
+        deleteSupplier,
         batches,
         setBatches,
         zones,

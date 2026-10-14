@@ -92,7 +92,7 @@ const isValidBarcodeValue = (text: string): boolean => {
 };
 
 export const POSTerminal: React.FC = () => {
-  const { products, orders, cart, addToCart, removeFromCart, updateCartQuantity, clearCart, addOrder, user, quickNotification, salesTags, addSalesTag, updateSalesTag, deleteSalesTag, settings, currentBranch } = useERP();
+  const { products, orders, cart, addToCart, removeFromCart, updateCartQuantity, clearCart, addOrder, user, quickNotification, salesTags, addSalesTag, updateSalesTag, deleteSalesTag, settings, currentBranch, barcodes, batches } = useERP();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
@@ -225,21 +225,36 @@ export const POSTerminal: React.FC = () => {
     const cleanInputAlphaNum = toAlphaNum(cleanInput);
     const cleanInputDigits = toDigits(cleanInput);
 
-    // 1. FAST LOCAL SYNC MATCH: Exact match by SKU or Barcode first (Product scan priority)
-    const foundProduct = products.find(p => 
-      p.barcode === cleanInput || 
-      p.sku.toLowerCase() === cleanInput.toLowerCase()
-    );
+    // 1. FAST LOCAL SYNC MATCH: Check BarcodeRecord or Batches for batch-bound price isolation
+    const matchedBarcodeRecord = barcodes.find(b => b.barcodeValue === cleanInput || b.batchNo === cleanInput);
+    let targetBatch: any | undefined;
+    let foundProduct: Product | undefined;
+
+    if (matchedBarcodeRecord) {
+      foundProduct = products.find(p => p.sku.toLowerCase() === matchedBarcodeRecord.sku.toLowerCase());
+      if (matchedBarcodeRecord.batchId) {
+        targetBatch = batches.find(b => b.id === matchedBarcodeRecord.batchId);
+      } else if (matchedBarcodeRecord.batchNo) {
+        targetBatch = batches.find(b => b.batchNo === matchedBarcodeRecord.batchNo && b.sku === matchedBarcodeRecord.sku);
+      }
+    }
+
+    if (!foundProduct) {
+      foundProduct = products.find(p => 
+        p.barcode === cleanInput || 
+        p.sku.toLowerCase() === cleanInput.toLowerCase()
+      );
+    }
 
     if (foundProduct) {
-      console.log(`[FRONTEND SCANNER] Instant local product match found:`, foundProduct.sku);
+      console.log(`[FRONTEND SCANNER] Instant local product/batch match found:`, foundProduct.sku, targetBatch ? `Batch: ${targetBatch.batchNo} (₹${targetBatch.sellingPrice})` : '');
       playBeep();
-      addToCart(foundProduct, 1);
+      addToCart(foundProduct, 1, targetBatch?.id);
       setScannedProduct(null);
       setProductNotFoundBarcode(null);
       quickNotification(
-        'Added to Cart',
-        `Added 1x ${foundProduct.name} (₹${foundProduct.price}) directly to cart.`,
+        'Added to Cart (Batch Isolated)',
+        `Added 1x ${foundProduct.name} ${targetBatch ? `[Batch: ${targetBatch.batchNo} @ ₹${targetBatch.sellingPrice}]` : ''} to cart.`,
         'success'
       );
       if (onDone) onDone();

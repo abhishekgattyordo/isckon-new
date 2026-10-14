@@ -155,7 +155,10 @@ CREATE TABLE barcode_records (
     format VARCHAR(32) DEFAULT 'code128',
     generated_at VARCHAR(64),
     template VARCHAR(255),
-    print_count INT DEFAULT 1
+    print_count INT DEFAULT 1,
+    batch_id VARCHAR(64),
+    purchase_cost DECIMAL(10, 2),
+    selling_price DECIMAL(10, 2)
 );
 
 -- 7. Users Table
