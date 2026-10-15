@@ -70,6 +70,7 @@ interface SkuSearchLookupProps {
   value: string;
   disabled?: boolean;
   availableProducts: SkuProductInfo[];
+  existingSkus?: Set<string>;
   onSelect: (sku: string) => void;
   currencySymbol?: string;
 }
@@ -78,6 +79,7 @@ const SkuSearchLookup: React.FC<SkuSearchLookupProps> = ({
   value,
   disabled = false,
   availableProducts = [],
+  existingSkus,
   onSelect,
   currencySymbol = '₹'
 }) => {
@@ -265,6 +267,11 @@ const SkuSearchLookup: React.FC<SkuSearchLookupProps> = ({
                             GST: {p.taxRate}%
                           </span>
                         )}
+                        {existingSkus?.has(p.sku.toUpperCase()) && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-700 dark:text-amber-300">
+                            In Shipment (auto-merges)
+                          </span>
+                        )}
                       </div>
                       <p className="truncate font-medium text-slate-900 dark:text-white mt-0.5">
                         {displayName}
@@ -367,23 +374,22 @@ export const DynamicShipmentItemsTable: React.FC<DynamicShipmentItemsTableProps>
     }
   }, [rows, totalUnits, totalValuation]);
 
-  // Handle SKU lookup selection and auto-fill callback
+  // Pass existing SKUs to highlight and manage duplicates
+  const existingSkus = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach(r => {
+      if (r.sku && r.sku.trim()) set.add(r.sku.trim().toUpperCase());
+    });
+    return set;
+  }, [rows]);
+
+  // Handle SKU lookup selection and auto-fill callback with duplicate prevention
   const handleSkuSelect = useCallback(
     async (rowId: string, selectedSku: string) => {
-      let matchedProd: SkuProductInfo | null | undefined = null;
-
-      if (onSkuLookup) {
-        matchedProd = await onSkuLookup(selectedSku);
-      }
-
-      if (!matchedProd && availableProducts.length > 0) {
-        matchedProd = availableProducts.find(p => p.sku === selectedSku);
-      }
-
-      setRows(prev =>
-        prev.map(row => {
-          if (row.id === rowId) {
-            if (!selectedSku) {
+      if (!selectedSku) {
+        setRows(prev =>
+          prev.map(row => {
+            if (row.id === rowId) {
               return {
                 ...row,
                 sku: '',
@@ -395,23 +401,80 @@ export const DynamicShipmentItemsTable: React.FC<DynamicShipmentItemsTableProps>
                 total: 0
               };
             }
+            return row;
+          })
+        );
+        return;
+      }
 
-            const desc = matchedProd?.description || matchedProd?.name || '';
-            const cost = matchedProd?.unitCost ?? matchedProd?.cost ?? '';
-            const price = matchedProd?.sellingPrice ?? matchedProd?.price ?? '';
-            const batch = matchedProd?.batchNo || row.batchNo || '';
-            const tax = matchedProd?.taxRate ?? 0;
-            const validTax = [0, 5, 12, 18].includes(tax) ? tax : 0;
+      const normSku = selectedSku.trim().toUpperCase();
 
+      // Check if this SKU is already added in another row in the table
+      const duplicateIndex = rows.findIndex(
+        r => r.id !== rowId && r.sku && r.sku.trim().toUpperCase() === normSku
+      );
+
+      let matchedProd: SkuProductInfo | null | undefined = null;
+      if (onSkuLookup) {
+        matchedProd = await onSkuLookup(selectedSku);
+      }
+      if (!matchedProd && availableProducts.length > 0) {
+        matchedProd = availableProducts.find(p => p.sku.toUpperCase() === normSku);
+      }
+
+      const desc = matchedProd?.description || matchedProd?.name || '';
+      const cost = matchedProd?.unitCost ?? matchedProd?.cost ?? '';
+      const price = matchedProd?.sellingPrice ?? matchedProd?.price ?? '';
+      const batch = matchedProd?.batchNo || '';
+      const tax = matchedProd?.taxRate ?? 0;
+      const validTax = [0, 5, 12, 18].includes(tax) ? tax : 0;
+
+      if (duplicateIndex !== -1) {
+        // Product already exists in another row! Consolidate quantity into the existing row
+        const existingRow = rows[duplicateIndex];
+        const currentRow = rows.find(r => r.id === rowId);
+        const addQty = typeof currentRow?.quantity === 'number' ? currentRow.quantity : (parseFloat(currentRow?.quantity as any) || 1);
+        const prevQty = typeof existingRow.quantity === 'number' ? existingRow.quantity : (parseFloat(existingRow.quantity as any) || 0);
+        const newQty = prevQty + addQty;
+
+        setRows(prev => {
+          const updated = prev.map(r => {
+            if (r.id === existingRow.id) {
+              const updatedCost = cost !== '' ? cost : r.unitCost;
+              const total = calculateRowTotal(newQty, updatedCost, validTax || r.taxRate);
+              return {
+                ...r,
+                quantity: newQty,
+                unitCost: updatedCost,
+                sellingPrice: price !== '' ? price : r.sellingPrice,
+                taxRate: validTax || r.taxRate,
+                total
+              };
+            }
+            return r;
+          });
+
+          // Remove the duplicate row if we have multiple rows, otherwise reset it
+          if (updated.length > 1) {
+            return updated.filter(r => r.id !== rowId);
+          } else {
+            return updated.map(r => (r.id === rowId ? createEmptyRow() : r));
+          }
+        });
+        return;
+      }
+
+      setRows(prev =>
+        prev.map(row => {
+          if (row.id === rowId) {
             const total = calculateRowTotal(row.quantity, cost, validTax);
-
             return {
               ...row,
               sku: selectedSku,
               description: desc,
               unitCost: cost,
               sellingPrice: price,
-              batchNo: batch,
+              batchNo: batch || row.batchNo,
               taxRate: validTax,
               total
             };
@@ -420,7 +483,7 @@ export const DynamicShipmentItemsTable: React.FC<DynamicShipmentItemsTableProps>
         })
       );
     },
-    [availableProducts, onSkuLookup]
+    [availableProducts, onSkuLookup, rows]
   );
 
   // Update specific row fields
@@ -529,6 +592,7 @@ export const DynamicShipmentItemsTable: React.FC<DynamicShipmentItemsTableProps>
                     value={row.sku}
                     disabled={readOnly}
                     availableProducts={availableProducts}
+                    existingSkus={existingSkus}
                     onSelect={sku => handleSkuSelect(row.id, sku)}
                     currencySymbol={currencySymbol}
                   />

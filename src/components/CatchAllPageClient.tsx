@@ -103,7 +103,11 @@ export default function CatchAllPageClient({ initialModule }: { initialModule?: 
     case 'products':
       return <ProductManagement />;
     case 'inventory':
-      return <InventoryDashboard />;
+      return <InventoryDashboard key="inventory-batches" initialTab="batches" />;
+    case 'stock_audit':
+      return <InventoryDashboard key="stock-audit-trail" initialTab="audit" />;
+    case 'warehouse_config':
+      return <InventoryDashboard key="warehouse-config" initialTab="configure_zones" />;
     case 'barcode':
       return <BarcodeManager />;
     case 'events':

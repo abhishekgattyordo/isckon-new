@@ -286,15 +286,22 @@ export const ProductManagement: React.FC = () => {
   }, [products]);
 
   const filteredProducts = useMemo(() => {
+    const seen = new Set<string>();
     return products.filter(p => {
       if (!p) return false;
+      const key = (p.sku || p.id).trim().toUpperCase();
+      if (seen.has(key)) return false;
       const matchesSearch =
         (p.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.sku || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.barcode || '').includes(searchQuery);
       const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
       const matchesStatus = selectedStatus === 'All' || p.status === selectedStatus;
-      return matchesSearch && matchesCat && matchesStatus;
+      if (matchesSearch && matchesCat && matchesStatus) {
+        seen.add(key);
+        return true;
+      }
+      return false;
     }).sort((a, b) => {
       let valA = a[sortField];
       let valB = b[sortField];
@@ -393,6 +400,24 @@ export const ProductManagement: React.FC = () => {
     else if (stockVal <= minVal) computedStatus = 'low_stock';
 
     if (activeDrawer === 'new') {
+      const existing = products.find(p => p.sku.trim().toUpperCase() === formData.sku!.trim().toUpperCase());
+      if (existing) {
+        updateProduct(existing.id, {
+          ...formData,
+          sku: formData.sku.trim(),
+          name: formData.name.trim(),
+          price: priceVal,
+          cost: costVal,
+          taxRate: taxRateVal,
+          stock: stockVal > 0 ? stockVal : existing.stock,
+          minStock: minVal,
+          status: computedStatus
+        });
+        quickNotification('Product Updated', `SKU ${formData.sku} already existed; updated existing product record instead of duplicating.`, 'info');
+        setActiveDrawer(null);
+        return;
+      }
+
       addProduct({
         sku: formData.sku.trim(),
         name: formData.name.trim(),

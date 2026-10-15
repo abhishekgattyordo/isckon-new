@@ -18,7 +18,6 @@ import {
   ShoppingCart,
   Receipt,
   RotateCcw,
-  BookOpen,
   Gift,
   Tags,
   Boxes,
@@ -28,7 +27,8 @@ import {
   Settings,
   Flame,
   Trash2,
-  Building2
+  Building2,
+  Layers
 } from 'lucide-react';
 
 interface NavItem {
@@ -65,9 +65,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Inventory & Barcodes',
     items: [
-      { id: 'products', label: 'Product Catalog', icon: BookOpen, iconColor: 'text-[#D97706]', iconBg: 'bg-amber-50' },
       { id: 'barcode', label: 'Barcodes & Labels', icon: QrCode, iconColor: 'text-[#D97706]', iconBg: 'bg-amber-50' },
-      { id: 'inventory', label: 'Stock & Inventory', icon: Warehouse, iconColor: 'text-[#D97706]', iconBg: 'bg-amber-50' }
+      { id: 'inventory', label: 'Inventory Batches', icon: Warehouse, iconColor: 'text-[#D97706]', iconBg: 'bg-amber-50' },
+      { id: 'stock_audit', label: 'Stock Audit Trail', icon: ShieldCheck, iconColor: 'text-[#D97706]', iconBg: 'bg-amber-50' },
+      { id: 'warehouse_config', label: 'Warehouse & Zone Config', icon: Layers, iconColor: 'text-[#D97706]', iconBg: 'bg-amber-50' }
     ]
   },
   {

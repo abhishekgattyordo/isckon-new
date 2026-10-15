@@ -89,8 +89,26 @@ export async function createInwardNote(noteData: Omit<MaterialInwardNote, 'id'>)
     }
   }
 
+  // Consolidate duplicate rows of the same SKU to prevent duplicate line items
+  const consolidatedMap = new Map<string, typeof noteData.items[0]>();
+  for (const item of noteData.items) {
+    const key = (item.sku || '').trim().toUpperCase();
+    if (consolidatedMap.has(key)) {
+      const ex = consolidatedMap.get(key)!;
+      ex.quantity = Number(ex.quantity) + Number(item.quantity);
+      ex.total = Number(ex.total) + Number(item.total);
+      if (item.unitCost) ex.unitCost = item.unitCost;
+      if (item.sellingPrice) ex.sellingPrice = item.sellingPrice;
+      if (item.batchNo) ex.batchNo = item.batchNo;
+    } else {
+      consolidatedMap.set(key, { ...item });
+    }
+  }
+  const cleanItems = Array.from(consolidatedMap.values());
+
   const newNote: MaterialInwardNote = {
     ...noteData,
+    items: cleanItems,
     id: `min-${Date.now()}`,
     isDeleted: false,
   };
@@ -111,8 +129,10 @@ export async function createInwardNote(noteData: Omit<MaterialInwardNote, 'id'>)
           timestamp: newNote.timestamp,
           notes: newNote.notes,
           isDeleted: false,
+          branchId: newNote.branchId,
+          branchName: newNote.branchName,
           items: {
-            create: newNote.items.map(item => ({
+            create: cleanItems.map(item => ({
               sku: item.sku,
               name: item.name,
               quantity: Number(item.quantity),
@@ -128,22 +148,40 @@ export async function createInwardNote(noteData: Omit<MaterialInwardNote, 'id'>)
         include: { items: true },
       });
 
-      // Update product stocks, costs, and selling prices
-      if (newNote.items && Array.isArray(newNote.items)) {
-        for (const item of newNote.items) {
-          const prod = await prisma.product.findUnique({ where: { sku: item.sku } });
-          if (prod) {
-            await prisma.product.update({
-              where: { sku: item.sku },
-              data: {
-                stock: prod.stock + Number(item.quantity),
-                cost: item.unitCost ? Number(item.unitCost) : prod.cost,
-                price: item.sellingPrice ? Number(item.sellingPrice) : prod.price,
-                batchNo: item.batchNo || prod.batchNo,
-                lastUpdated: new Date(),
-              },
-            });
-          }
+      // Update product stocks, costs, and selling prices (or create if newly introduced item)
+      for (const item of cleanItems) {
+        const prod = await prisma.product.findUnique({ where: { sku: item.sku } });
+        if (prod) {
+          await prisma.product.update({
+            where: { sku: item.sku },
+            data: {
+              stock: prod.stock + Number(item.quantity),
+              cost: item.unitCost ? Number(item.unitCost) : prod.cost,
+              price: item.sellingPrice ? Number(item.sellingPrice) : prod.price,
+              batchNo: item.batchNo || prod.batchNo,
+              lastUpdated: new Date(),
+            },
+          });
+        } else {
+          // Auto-create product record if inwarding a newly created SKU
+          await prisma.product.create({
+            data: {
+              id: `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+              sku: item.sku,
+              name: item.name || 'General Inventory Item',
+              category: 'General Merchandise',
+              price: item.sellingPrice ? Number(item.sellingPrice) : (Number(item.unitCost) * 1.5),
+              cost: Number(item.unitCost),
+              stock: Number(item.quantity),
+              minStock: 5,
+              warehouseZone: newNote.warehouse || 'Zone A',
+              batchNo: item.batchNo || '',
+              status: Number(item.quantity) > 5 ? 'in_stock' : 'low_stock',
+              branchId: newNote.branchId,
+              branchName: newNote.branchName,
+              isDeleted: false,
+            }
+          }).catch(err => console.warn('Could not auto-create product in DB:', err));
         }
       }
 
@@ -160,18 +198,34 @@ export async function createInwardNote(noteData: Omit<MaterialInwardNote, 'id'>)
   // Fallback to MemoryDb
   MemoryDb.inwardNotes.unshift(newNote);
 
-  // Automatically update product stock, cost, and selling price in MemoryDb
-  if (newNote.items && Array.isArray(newNote.items)) {
-    newNote.items.forEach((item: any) => {
-      const prod = MemoryDb.products.find(p => p.sku === item.sku);
-      if (prod) {
-        prod.stock += Number(item.quantity);
-        if (item.unitCost) prod.cost = Number(item.unitCost);
-        if (item.sellingPrice) prod.price = Number(item.sellingPrice);
-        if (item.batchNo) prod.batchNo = item.batchNo;
-      }
-    });
-  }
+  // Automatically update product stock, cost, and selling price in MemoryDb (or add product)
+  cleanItems.forEach((item: any) => {
+    const prod = MemoryDb.products.find(p => p.sku === item.sku);
+    if (prod) {
+      prod.stock += Number(item.quantity);
+      if (item.unitCost) prod.cost = Number(item.unitCost);
+      if (item.sellingPrice) prod.price = Number(item.sellingPrice);
+      if (item.batchNo) prod.batchNo = item.batchNo;
+    } else {
+      MemoryDb.products.unshift({
+        id: `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        sku: item.sku,
+        name: item.name || 'General Inventory Item',
+        category: 'General Merchandise',
+        price: item.sellingPrice ? Number(item.sellingPrice) : (Number(item.unitCost) * 1.5),
+        cost: Number(item.unitCost),
+        stock: Number(item.quantity),
+        minStock: 5,
+        warehouseZone: newNote.warehouse || 'Zone A',
+        batchNo: item.batchNo || '',
+        status: Number(item.quantity) > 5 ? 'in_stock' : 'low_stock',
+        branchId: newNote.branchId,
+        branchName: newNote.branchName,
+        isDeleted: false,
+        lastUpdated: new Date().toISOString()
+      });
+    }
+  });
 
   return newNote;
 }

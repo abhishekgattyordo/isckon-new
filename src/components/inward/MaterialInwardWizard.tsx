@@ -103,7 +103,10 @@ export const MaterialInwardWizard: React.FC = () => {
   const totalUnitsStocked = inwardNotes.reduce((sum, n) => sum + (n.items?.reduce((s, i) => s + Number(i.quantity), 0) || 0), 0);
   const uniqueVendorsCount = new Set(inwardNotes.map(n => n.vendorName)).size;
 
-  const handleCompleteGrn = () => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleCompleteGrn = async () => {
+    if (isSubmitting) return;
     if (!vendorName.trim()) {
       quickNotification('Validation Error', 'Vendor Name is mandatory.', 'alert');
       return;
@@ -117,30 +120,35 @@ export const MaterialInwardWizard: React.FC = () => {
       return;
     }
 
-    const grnNo = `GRN-${currentBranch?.code || 'HQ'}-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    setGeneratedGrnNumber(grnNo);
+    setIsSubmitting(true);
+    try {
+      const grnNo = `GRN-${currentBranch?.code || 'HQ'}-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+      setGeneratedGrnNumber(grnNo);
 
-    addInwardNote({
-      grnNumber: grnNo,
-      poNumber: poNumber.trim(),
-      vendorName: vendorName.trim(),
-      invoiceDate: invoiceDate,
-      warehouse: selectedZone,
-      branchId: currentBranch?.id || 'branch-mayapur-hq',
-      branchName: currentBranch?.name || 'Mayapur HQ Central',
-      items: items,
-      status: 'completed',
-      totalValue: totalGrnValue,
-      receivedBy: user?.name || 'Store Operator',
-      timestamp: new Date().toISOString(),
-      notes: grnNotes
-    });
+      await addInwardNote({
+        grnNumber: grnNo,
+        poNumber: poNumber.trim(),
+        vendorName: vendorName.trim(),
+        invoiceDate: invoiceDate,
+        warehouse: selectedZone,
+        branchId: currentBranch?.id || 'branch-mayapur-hq',
+        branchName: currentBranch?.name || 'Mayapur HQ Central',
+        items: items,
+        status: 'completed',
+        totalValue: totalGrnValue,
+        receivedBy: user?.name || 'Store Operator',
+        timestamp: new Date().toISOString(),
+        notes: grnNotes
+      });
 
-    if (autoPrintLabels) {
-      quickNotification('Barcode Stickers Sent to Printer', `Dispatched ${totalUnits} serialized tags to terminal printer.`, 'info');
+      if (autoPrintLabels) {
+        quickNotification('Barcode Stickers Sent to Printer', `Dispatched ${totalUnits} serialized tags to terminal printer.`, 'info');
+      }
+
+      setStep(4);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setStep(4);
   };
 
   return (
@@ -960,10 +968,11 @@ export const MaterialInwardWizard: React.FC = () => {
                 </button>
                 <button
                   onClick={handleCompleteGrn}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>CONFIRM & COMMIT GRN</span>
+                  <span>{isSubmitting ? 'COMMITTING...' : 'CONFIRM & COMMIT GRN'}</span>
                 </button>
               </div>
             </div>

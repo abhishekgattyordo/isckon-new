@@ -77,7 +77,7 @@ export const WarehouseZoneManagement: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState('all');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('all');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);

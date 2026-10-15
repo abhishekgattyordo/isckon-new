@@ -4,6 +4,8 @@ export type ModuleType =
   | 'inward'
   | 'suppliers'
   | 'inventory'
+  | 'stock_audit'
+  | 'warehouse_config'
   | 'barcode'
   | 'pos'
   | 'events'

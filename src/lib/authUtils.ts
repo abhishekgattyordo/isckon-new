@@ -17,7 +17,9 @@ export const ALL_SYSTEM_MODULES: { id: ModuleType | 'audit'; label: string; desc
   { id: 'inward', label: 'Material Inward GRN', description: 'Log incoming material shipments, verify supplier parameters, and record custom batch parameters.', category: 'Core Operations' },
   { id: 'suppliers', label: 'Suppliers & Vendors', description: 'Manage vendor directory, payment terms, GSTIN tax credentials, and inward purchase histories.', category: 'Core Operations' },
   { id: 'products', label: 'Product Catalog & Master Items', description: 'Browse and manage products, book catalog, categories, pricing, and master item specs.', category: 'Inventory & Catalog' },
-  { id: 'inventory', label: 'Stock & Inventory', description: 'Monitor warehouse zones, track granular batch ages, execute stock transfers, and log shrinkage adjustments.', category: 'Inventory & Catalog' },
+  { id: 'inventory', label: 'Inventory Batches', description: 'Monitor warehouse zones and track granular batch ages and inventory valuations.', category: 'Inventory & Catalog' },
+  { id: 'stock_audit', label: 'Stock Audit Trail', description: 'Immutable audit ledger capturing inbound shipment receipts, POS register sales, and inventory adjustments.', category: 'Inventory & Catalog' },
+  { id: 'warehouse_config', label: 'Warehouse & Zone Config', description: 'Configure warehouse facilities, temperature control zones, and capacity slots.', category: 'Inventory & Catalog' },
   { id: 'barcode', label: 'Barcode & Labels', description: 'Design custom print labels, generate standard EAN barcodes, and trigger queue prints.', category: 'Inventory & Catalog' },
   { id: 'events', label: 'Sales Events & Stalls', description: 'Manage transient temple festival stalls, distribute offline stocks, and consolidate stall summaries.', category: 'Promotions & Events' },
   { id: 'reports', label: 'Reports & Analytics', description: 'Review comprehensive profit margins, track sales trends, and download tax compliance invoices.', category: 'Reports' },
@@ -49,15 +51,15 @@ export function getDefaultPermissionsForRole(role: UserProfile['role']): (Module
     case 'Super Admin':
     case 'Administrator':
     case 'System Admin':
-      return ['dashboard', 'products', 'pos', 'inward', 'suppliers', 'inventory', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
+      return ['dashboard', 'products', 'pos', 'inward', 'suppliers', 'inventory', 'stock_audit', 'warehouse_config', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
     case 'Branch Admin':
     case 'Store Manager':
-      return ['dashboard', 'products', 'pos', 'inward', 'suppliers', 'inventory', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
+      return ['dashboard', 'products', 'pos', 'inward', 'suppliers', 'inventory', 'stock_audit', 'warehouse_config', 'barcode', 'events', 'reports', 'settings', 'audit', 'recycle_bin'];
     case 'Warehouse Manager':
-      return ['dashboard', 'products', 'inward', 'suppliers', 'inventory', 'barcode', 'reports'];
+      return ['dashboard', 'products', 'inward', 'suppliers', 'inventory', 'stock_audit', 'warehouse_config', 'barcode', 'reports'];
     case 'Store Executive':
       // Restricted operational access: POS Checkout Stalls, Product Catalog, Sales Events & Stalls, Suppliers & Vendors
-      return ['dashboard', 'pos', 'products', 'events', 'suppliers'];
+      return ['dashboard', 'pos', 'products', 'events', 'suppliers', 'inventory', 'stock_audit'];
     case 'Lead Cashier':
     case 'Cashier':
       return ['dashboard', 'pos', 'products'];

@@ -384,9 +384,19 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return false;
   }, []);
 
-  // Filtered collections strictly scoped to the active currentBranch
+  // Filtered collections strictly scoped to the active currentBranch with strict deduplication
   const products = React.useMemo(() => {
-    return allProducts.filter(p => isItemInActiveBranch(p, currentBranch));
+    const branchItems = allProducts.filter(p => isItemInActiveBranch(p, currentBranch));
+    const seen = new Set<string>();
+    const deduplicated: Product[] = [];
+    for (const p of branchItems) {
+      const key = (p.sku || p.id).trim().toUpperCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(p);
+      }
+    }
+    return deduplicated;
   }, [allProducts, currentBranch, isItemInActiveBranch]);
 
   const inwardNotes = React.useMemo(() => {
@@ -409,19 +419,33 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return allMovements.filter(m => isItemInActiveBranch(m, currentBranch));
   }, [allMovements, currentBranch, isItemInActiveBranch]);
 
-  // Backward compatibility setters that operate on master collections
+  // Backward compatibility setters that operate on master collections with deduplication
   const setProducts = (action: React.SetStateAction<Product[]>) => {
     if (typeof action === 'function') {
       setAllProducts(prevAll => {
         const branchSubset = prevAll.filter(p => isItemInActiveBranch(p, currentBranch));
         const nonBranchSubset = prevAll.filter(p => !isItemInActiveBranch(p, currentBranch));
         const updatedBranchSubset = action(branchSubset);
-        return [...updatedBranchSubset, ...nonBranchSubset];
+        const combined = [...updatedBranchSubset, ...nonBranchSubset];
+        const seen = new Set<string>();
+        return combined.filter(p => {
+          const key = (p.sku || p.id).trim().toUpperCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
       });
     } else {
       setAllProducts(prevAll => {
         const nonBranchSubset = prevAll.filter(p => !isItemInActiveBranch(p, currentBranch));
-        return [...action, ...nonBranchSubset];
+        const combined = [...action, ...nonBranchSubset];
+        const seen = new Set<string>();
+        return combined.filter(p => {
+          const key = (p.sku || p.id).trim().toUpperCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
       });
     }
   };
@@ -1085,13 +1109,24 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addProduct = (prodData: Omit<Product, 'id'>) => {
+    const normSku = (prodData.sku || '').trim().toUpperCase();
+    const existing = allProducts.find(p => (p.sku || '').trim().toUpperCase() === normSku);
+    if (existing) {
+      updateProduct(existing.id, prodData);
+      quickNotification('Product Updated', `SKU ${prodData.sku} already existed; updated its record instead of creating a duplicate.`, 'info');
+      return;
+    }
+
     const newProd: Product = {
       ...prodData,
       id: `prod-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       branchId: prodData.branchId || currentBranch?.id || 'branch-mayapur-hq',
       branchName: prodData.branchName || currentBranch?.name || 'Mayapur HQ Central'
     };
-    setAllProducts(prev => [newProd, ...prev]);
+    setAllProducts(prev => {
+      const filtered = prev.filter(p => (p.sku || '').trim().toUpperCase() !== normSku);
+      return [newProd, ...filtered];
+    });
 
     fetch('/api/products', {
       method: 'POST',
@@ -1157,9 +1192,28 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const addInwardNote = (noteData: Omit<MaterialInwardNote, 'id'>) => {
+  const addInwardNote = async (noteData: Omit<MaterialInwardNote, 'id'>) => {
+    // 1. Strictly deduplicate & consolidate line items by SKU before processing
+    const consolidatedMap = new Map<string, InwardItem>();
+    (noteData.items || []).forEach(item => {
+      const key = (item.sku || '').trim().toUpperCase();
+      if (!key) return;
+      if (consolidatedMap.has(key)) {
+        const ex = consolidatedMap.get(key)!;
+        ex.quantity = Number(ex.quantity) + Number(item.quantity);
+        ex.total = Number(ex.total) + Number(item.total);
+        if (item.unitCost) ex.unitCost = item.unitCost;
+        if (item.sellingPrice) ex.sellingPrice = item.sellingPrice;
+        if (item.batchNo) ex.batchNo = item.batchNo;
+      } else {
+        consolidatedMap.set(key, { ...item });
+      }
+    });
+    const consolidatedItems = Array.from(consolidatedMap.values());
+
     const newNote: MaterialInwardNote = {
       ...noteData,
+      items: consolidatedItems,
       id: `min-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       branchId: noteData.branchId || currentBranch?.id || 'branch-mayapur-hq',
       branchName: noteData.branchName || currentBranch?.name || 'Mayapur HQ Central',
@@ -1169,31 +1223,62 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setInwardNotes(prev => [newNote, ...prev]);
 
-    fetch('/api/inward', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newNote)
-    }).catch(e => console.warn('Could not post inward note:', e));
+    try {
+      const response = await fetch('/api/inward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newNote)
+      });
+      if (!response.ok) {
+        throw new Error('Failed to save GRN to server');
+      }
+      quickNotification('GRN Saved', 'Document successfully saved to server.', 'success');
+    } catch (e) {
+      console.error('Could not post inward note:', e);
+      quickNotification('Sync Error', 'Failed to save GRN to server. Data might be lost on refresh.', 'alert');
+    }
 
-    // Automatically adjust inventory stock levels based on GRN items
-    newNote.items.forEach(item => {
-      setProducts(prev =>
-        prev.map(p => {
-          if (p.sku === item.sku) {
-            const newStock = p.stock + item.quantity;
-            return {
-              ...p,
-              stock: newStock,
-              cost: item.unitCost > 0 ? item.unitCost : p.cost,
-              price: item.sellingPrice && item.sellingPrice > 0 ? item.sellingPrice : p.price,
-              batchNo: item.batchNo || p.batchNo,
-              status: newStock <= p.minStock ? 'low_stock' : 'in_stock',
-              lastUpdated: new Date().toISOString()
-            };
-          }
-          return p;
-        })
-      );
+    // 2. Adjust inventory stock levels for existing products or register new product in catalog
+    consolidatedItems.forEach(item => {
+      setProducts(prev => {
+        const exists = prev.some(p => (p.sku || '').trim().toUpperCase() === item.sku.trim().toUpperCase());
+        if (exists) {
+          return prev.map(p => {
+            if ((p.sku || '').trim().toUpperCase() === item.sku.trim().toUpperCase()) {
+              const newStock = p.stock + item.quantity;
+              return {
+                ...p,
+                stock: newStock,
+                cost: item.unitCost > 0 ? item.unitCost : p.cost,
+                price: item.sellingPrice && item.sellingPrice > 0 ? item.sellingPrice : p.price,
+                batchNo: item.batchNo || p.batchNo,
+                status: newStock <= p.minStock ? 'low_stock' : 'in_stock',
+                lastUpdated: new Date().toISOString()
+              };
+            }
+            return p;
+          });
+        } else {
+          // If product doesn't exist in active branch, add it cleanly
+          const newProductEntry: Product = {
+            id: `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            sku: item.sku,
+            name: item.name || 'Inwarded Product',
+            category: 'General Merchandise',
+            price: item.sellingPrice && item.sellingPrice > 0 ? item.sellingPrice : (item.unitCost * 1.5),
+            cost: item.unitCost,
+            stock: item.quantity,
+            minStock: 5,
+            warehouseZone: newNote.warehouse || 'Zone A — Main Retail Floor',
+            batchNo: item.batchNo || '',
+            status: item.quantity > 5 ? 'in_stock' : 'low_stock',
+            lastUpdated: new Date().toISOString(),
+            branchId: newNote.branchId,
+            branchName: newNote.branchName
+          };
+          return [newProductEntry, ...prev];
+        }
+      });
 
       // Create a new inventory batch
       const newBatch: InventoryBatch = {
@@ -1212,7 +1297,6 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setBatches(prev => [newBatch, ...prev]);
 
       // Generate a unique batch-bound barcode value (EAN-13 compliant 13-digit identifier)
-      // Hash includes SKU, batch number, GRN number, and cost to ensure unique barcode per inward event
       const seedString = `${item.sku}-${newBatch.batchNo}-${newNote.grnNumber}-${Math.floor(item.unitCost)}`;
       const seedNum = Math.abs(seedString.split('').reduce((acc, c) => ((acc << 5) - acc) + c.charCodeAt(0), 0));
       const raw9 = String(seedNum).padStart(9, '0').slice(-9);

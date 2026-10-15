@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     const branchId = url.searchParams.get('branchId') || req.headers.get('x-branch-id') || undefined;
     const search = url.searchParams.get('search') || undefined;
     const page = parseInt(url.searchParams.get('page') || '1', 10);
-    const limit = parseInt(url.searchParams.get('limit') || '20', 10);
+    const limit = url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')!, 10) : 500;
 
     const result = await getProducts({ includeDeleted, branchId, search, page, limit });
     return NextResponse.json({

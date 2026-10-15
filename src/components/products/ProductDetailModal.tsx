@@ -39,14 +39,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   onClose,
   onEdit,
 }) => {
-  const { deleteProduct, batches } = useERP();
+  const { deleteProduct, batches, movements } = useERP();
   const [activeTab, setActiveTab] = useState<'overview' | 'inventory' | 'pricing' | 'history' | 'audit'>('overview');
 
   const margin = Math.round(((product.price - product.cost) / product.price) * 100);
   const profitPerUnit = product.price - product.cost;
 
-  // Find associated batches for this SKU
+  // Find associated batches and stock movements for this SKU
   const productBatches = batches.filter(b => b.sku.toLowerCase() === product.sku.toLowerCase());
+  const productMovements = movements.filter(m => m.sku.toLowerCase() === product.sku.toLowerCase());
 
   const handleDelete = () => {
     if (confirm(`Are you sure you want to delete product "${product.name}"?`)) {
@@ -368,28 +369,41 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             <div className="space-y-4">
               <h3 className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">Recent Stock Movement Transactions</h3>
               <div className="space-y-2.5">
-                {[
-                  { type: 'inward', title: 'Material Inward GRN #GRN-2026-081', qty: '+50 units', date: '2026-08-01 10:30 AM', user: 'Warehouse Manager' },
-                  { type: 'sale', title: 'POS Checkout Order #INV-2026-481', qty: '-3 units', date: '2026-08-02 02:15 PM', user: 'Counter Cashier #1' },
-                  { type: 'sale', title: 'POS Checkout Order #INV-2026-485', qty: '-2 units', date: '2026-08-03 09:40 AM', user: 'Counter Cashier #2' },
-                ].map((item, idx) => (
-                  <div key={idx} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold ${
-                        item.type === 'inward' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
-                      }`}>
-                        {item.type === 'inward' ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                {productMovements.length > 0 ? (
+                  productMovements.map((mov) => {
+                    const isInward = mov.type === 'inward_grn' || mov.qtyDelta > 0;
+                    const titleText = mov.type === 'inward_grn' 
+                      ? `Material Inward GRN #${mov.referenceNo}` 
+                      : mov.type === 'pos_sale' 
+                      ? `POS Checkout Order #${mov.referenceNo}`
+                      : mov.type === 'zone_transfer'
+                      ? `Zone Transfer (${mov.fromZone || 'Zone A'} → ${mov.toZone || 'Zone B'})`
+                      : `Stock Adjustment (${mov.referenceNo || 'Manual'})`;
+
+                    return (
+                      <div key={mov.id} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold ${
+                            isInward ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
+                          }`}>
+                            {isInward ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                          </div>
+                          <div>
+                            <div className="font-semibold text-slate-900 dark:text-white">{titleText}</div>
+                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{new Date(mov.timestamp).toLocaleString()} • Handled by {mov.operator} {mov.batchNo ? `• Batch: ${mov.batchNo}` : ''}</div>
+                          </div>
+                        </div>
+                        <div className={`font-mono font-bold text-sm ${isInward ? 'text-emerald-600' : 'text-amber-600'}`}>
+                          {isInward ? `+${mov.qtyDelta} units` : `${mov.qtyDelta} units`}
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-semibold text-slate-900 dark:text-white">{item.title}</div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{item.date} • Handled by {item.user}</div>
-                      </div>
-                    </div>
-                    <div className={`font-mono font-bold text-sm ${item.type === 'inward' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                      {item.qty}
-                    </div>
+                    );
+                  })
+                ) : (
+                  <div className="p-8 text-center text-slate-400 font-mono text-xs bg-slate-50 dark:bg-slate-900/30 rounded-2xl border border-slate-200 dark:border-slate-800">
+                    No recent stock movement transactions recorded for SKU <span className="font-bold text-slate-700 dark:text-slate-300">{product.sku}</span>. Current stock balance: {product.stock} units.
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}

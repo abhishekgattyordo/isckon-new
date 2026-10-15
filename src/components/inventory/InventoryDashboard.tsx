@@ -40,7 +40,11 @@ import { ProductDetailModal } from '../products/ProductDetailModal';
 import { WarehouseZoneManagement } from '../settings/WarehouseZoneManagement';
 import { isProductInZone, calculateZoneStats } from '../../lib/warehouseUtils';
 
-export const InventoryDashboard: React.FC = () => {
+export interface InventoryDashboardProps {
+  initialTab?: 'batches' | 'audit' | 'configure_zones';
+}
+
+export const InventoryDashboard: React.FC<InventoryDashboardProps> = ({ initialTab = 'batches' }) => {
   const {
     zones,
     products,
@@ -53,7 +57,11 @@ export const InventoryDashboard: React.FC = () => {
   } = useERP();
 
   // Tab State: 'batches' (Zone Inventory Batches) vs 'audit' (Stock Movement Audit Trail) vs 'configure_zones'
-  const [activeTab, setActiveTab] = useState<'batches' | 'audit' | 'configure_zones'>('batches');
+  const [activeTab, setActiveTab] = useState<'batches' | 'audit' | 'configure_zones'>(initialTab);
+
+  React.useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   // Zone selection ('all' or specific zone id)
   const [selectedZoneId, setSelectedZoneId] = useState<string>('all');
@@ -64,7 +72,7 @@ export const InventoryDashboard: React.FC = () => {
   // Search & Filter States for Batches Tab
   const [batchSearchQuery, setBatchSearchQuery] = useState('');
   const [batchStatusFilter, setBatchStatusFilter] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
-  const [batchViewMode, setBatchViewMode] = useState<'cards' | 'table'>('cards');
+  const [batchViewMode, setBatchViewMode] = useState<'cards' | 'table'>('table');
 
   // Search & Filter States for Audit Trail Tab
   const [searchMovement, setSearchMovement] = useState('');
@@ -253,14 +261,28 @@ export const InventoryDashboard: React.FC = () => {
         <div>
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 border border-purple-200 dark:border-purple-800">
-              <Warehouse className="w-5 h-5" />
+              {activeTab === 'audit' ? (
+                <Clock className="w-5 h-5" />
+              ) : activeTab === 'configure_zones' ? (
+                <Layers className="w-5 h-5" />
+              ) : (
+                <Boxes className="w-5 h-5" />
+              )}
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                Stock & Inventory Control
+                {activeTab === 'audit'
+                  ? 'Stock Movement Audit Trail'
+                  : activeTab === 'configure_zones'
+                  ? 'Warehouse & Zone Configuration'
+                  : 'Facility Zones & Inventory Batches'}
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-                ZONE TELEMETRY • INVENTORY BATCHES • IMMUTABLE AUDIT TRAIL
+                {activeTab === 'audit'
+                  ? 'IMMUTABLE AUDIT LEDGER • SHIPMENTS • SALES • TRANSFERS • ADJUSTMENTS'
+                  : activeTab === 'configure_zones'
+                  ? 'STORAGE FACILITIES • CLIMATE CONTROLLED ZONES • CAPACITY MANAGEMENT'
+                  : 'ZONE TELEMETRY • INVENTORY BATCHES • LIVE PRODUCT ALLOCATION'}
               </p>
             </div>
           </div>
@@ -289,57 +311,6 @@ export const InventoryDashboard: React.FC = () => {
             <span>+ Receive Shipment (GRN)</span>
           </button>
         </div>
-      </div>
-
-      {/* Primary Navigation Tabs: Inventory Batches vs Audit Trail */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-px">
-        <button
-          type="button"
-          onClick={() => setActiveTab('batches')}
-          className={`px-5 py-2.5 text-xs font-bold transition-all relative flex items-center gap-2 cursor-pointer ${
-            activeTab === 'batches'
-              ? 'text-purple-600 dark:text-purple-400 border-b-2 border-purple-600 font-extrabold'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Boxes className="w-4 h-4" />
-          <span>Facility Zones & Inventory Batches</span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">
-            {products.length} Batches
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('audit')}
-          className={`px-5 py-2.5 text-xs font-bold transition-all relative flex items-center gap-2 cursor-pointer ${
-            activeTab === 'audit'
-              ? 'text-purple-600 dark:text-purple-400 border-b-2 border-purple-600 font-extrabold'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Clock className="w-4 h-4" />
-          <span>Stock Movement Audit Trail</span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            {movements.length} Logs
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('configure_zones')}
-          className={`px-5 py-2.5 text-xs font-bold transition-all relative flex items-center gap-2 cursor-pointer ${
-            activeTab === 'configure_zones'
-              ? 'text-purple-600 dark:text-purple-400 border-b-2 border-purple-600 font-extrabold'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Warehouse className="w-4 h-4" />
-          <span>Configure Warehouses & Zones</span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-            {zones.length} Zones
-          </span>
-        </button>
       </div>
 
       {/* ========================================================================= */}
